@@ -75,7 +75,7 @@ RSS_FEEDS = [
 # SOCIAL LINKS
 # ============================================================
 
-TELEGRAM_LINK = "https://t.me/jahantab_newd"
+TELEGRAM_LINK = "https://t.me/jahantab_news"
 BALE_LINK = "https://ble.ir/jahantabnews"
 SOROUSH_LINK = "https://splus.ir/jahantabnews"
 
