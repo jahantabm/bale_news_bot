@@ -53,6 +53,11 @@ APPROVED_DOMAINS = {
     "akharinkhabar.ir",
     "roozplus.com",
     "khabaronline.ir",
+    "ilna.ir",
+
+    # صدا و سیمای جمهوری اسلامی ایران
+    "iribnews.ir",
+    "iribnews.com",
 }
 
 
@@ -74,6 +79,14 @@ RSS_FEEDS = [
         "url": "https://www.mehrnews.com/rss",
     },
     {
+        "name": "فارس",
+        "url": "https://www.farsnews.ir/rss",
+    },
+    {
+        "name": "ایلنا",
+        "url": "https://www.ilna.ir/rss",
+    },
+    {
         "name": "تابناک",
         "url": "https://www.tabnak.ir/fa/rss/allnews",
     },
@@ -93,14 +106,13 @@ RSS_FEEDS = [
 
 
 # ============================================================
-# SISTAN & BALUCHESTAN / MAKran
+# SISTAN & BALUCHESTAN
 # ============================================================
 
 PROVINCE_TERMS = [
     "سیستان و بلوچستان",
     "سیستان‌وبلوچستان",
-    "سیستان",
-    "بلوچستان",
+    "سیستان‌ و بلوچستان",
 ]
 
 CITY_TERMS = [
@@ -134,7 +146,14 @@ CITY_TERMS = [
     "پلان",
     "تلنگ",
     "زرآباد",
+    "کورین",
+    "پیشین",
 ]
+
+
+# ============================================================
+# MAKRAN / OMAN SEA
+# ============================================================
 
 MAKRAN_TERMS = [
     "ساحل مکران",
@@ -145,7 +164,7 @@ MAKRAN_TERMS = [
 
 
 # ============================================================
-# WORDS THAT MAKE A NEWS ITEM CLEARLY NON-LOCAL
+# CLEARLY NON-LOCAL SUBJECTS
 # ============================================================
 
 NON_LOCAL_SPORTS_TERMS = [
@@ -522,7 +541,9 @@ def get_image_from_article(url):
 # ============================================================
 
 def fetch_feed(source):
+
     try:
+
         response = requests.get(
             source["url"],
             timeout=20,
@@ -546,6 +567,7 @@ def fetch_feed(source):
         return feed
 
     except Exception as exc:
+
         print(
             f"{source['name']} feed error: "
             f"{exc}"
@@ -558,36 +580,40 @@ def fetch_feed(source):
 # LOCAL NEWS FILTER
 # ============================================================
 
-def local_relevance_score(title, summary):
+def local_relevance_score(
+    title,
+    summary,
+):
+
     title = clean_text(title)
     summary = clean_text(summary)
 
     title_lower = title.lower()
-    summary_lower = summary.lower()
 
     # --------------------------------------------------------
-    # Explicitly reject obvious nationwide sports/
-    # entertainment news unless a strong local connection
-    # exists in the title.
+    # Local terms
     # --------------------------------------------------------
+
+    local_title_terms = (
+        PROVINCE_TERMS
+        + CITY_TERMS
+        + MAKRAN_TERMS
+    )
+
+    local_summary_terms = (
+        PROVINCE_TERMS
+        + CITY_TERMS
+        + MAKRAN_TERMS
+    )
 
     has_local_title = any(
         term in title
-        for term in (
-            PROVINCE_TERMS
-            + CITY_TERMS
-            + MAKRAN_TERMS
-        )
+        for term in local_title_terms
     )
 
-    has_local_summary = any(
-        term in summary
-        for term in (
-            PROVINCE_TERMS
-            + CITY_TERMS
-            + MAKRAN_TERMS
-        )
-    )
+    # --------------------------------------------------------
+    # Reject obvious unrelated sports news.
+    # --------------------------------------------------------
 
     if any(
         term.lower() in title_lower
@@ -595,6 +621,10 @@ def local_relevance_score(title, summary):
     ):
         if not has_local_title:
             return 0
+
+    # --------------------------------------------------------
+    # Reject obvious entertainment news.
+    # --------------------------------------------------------
 
     if any(
         term.lower() in title_lower
@@ -604,66 +634,66 @@ def local_relevance_score(title, summary):
             return 0
 
     # --------------------------------------------------------
-    # Strong title match = local news
+    # Strong local title
     # --------------------------------------------------------
 
-    title_score = 0
+    score = 0
 
     for term in PROVINCE_TERMS:
         if term in title:
-            title_score += 10
+            score += 20
 
     for term in CITY_TERMS:
         if term in title:
-            title_score += 8
+            score += 15
 
     for term in MAKRAN_TERMS:
         if term in title:
-            title_score += 8
+            score += 15
+
+    if score > 0:
+        return score
 
     # --------------------------------------------------------
-    # If title has no local term, require TWO independent
-    # local indicators in title + summary.
-    # This prevents accidental matches.
+    # If title does NOT contain a local place,
+    # require at least TWO different local indicators
+    # in the summary.
     # --------------------------------------------------------
 
-    if title_score == 0:
+    indicators = set()
 
-        indicators = set()
+    for term in local_summary_terms:
+        if term in summary:
+            indicators.add(term)
 
-        for term in PROVINCE_TERMS:
-            if term in summary:
-                indicators.add(term)
-
-        for term in CITY_TERMS:
-            if term in summary:
-                indicators.add(term)
-
-        for term in MAKRAN_TERMS:
-            if term in summary:
-                indicators.add(term)
-
-        if len(indicators) < 2:
-            return 0
-
+    if len(indicators) >= 2:
         return 5
 
-    # Strong local title match
-    return title_score
+    return 0
 
 
-def is_local_news(title, summary):
-    return local_relevance_score(
-        title,
-        summary,
-    ) > 0
+def is_local_news(
+    title,
+    summary,
+):
+
+    return (
+        local_relevance_score(
+            title,
+            summary,
+        )
+        > 0
+    )
 
 
 # ============================================================
 # NATIONAL VERY IMPORTANT NEWS
 # ============================================================
 
-def national_news_score(title, summary):
+def national_news_score(
+    title,
+    summary,
+):
 
     text = f"{title} {summary}"
 
@@ -683,18 +713,22 @@ def national_news_score(title, summary):
 
 
 # ============================================================
-# CLASSIFY
+# CLASSIFICATION
 # ============================================================
 
-def classify_news(title, summary):
+def classify_news(
+    title,
+    summary,
+):
 
-    # Local has priority.
+    # Local news gets priority.
     if is_local_news(
         title,
         summary,
     ):
         return "استان سیستان و بلوچستان"
 
+    # Only very important national events.
     national_score = national_news_score(
         title,
         summary,
@@ -707,7 +741,7 @@ def classify_news(title, summary):
 
 
 # ============================================================
-# COLLECT
+# COLLECT NEWS
 # ============================================================
 
 def collect_news():
@@ -753,7 +787,10 @@ def collect_news():
             if not title or not link:
                 continue
 
-            # Only approved internal domains.
+            # ------------------------------------------------
+            # ONLY APPROVED INTERNAL SOURCES
+            # ------------------------------------------------
+
             if not is_approved_source(
                 link
             ):
@@ -825,7 +862,8 @@ def collect_news():
 
 
 # ============================================================
-# SELECT 3 LOCAL + 1 NATIONAL
+# SELECT:
+# 3 LOCAL + 1 NATIONAL
 # ============================================================
 
 def select_news(news):
@@ -860,7 +898,6 @@ def select_news(news):
         reverse=True,
     )
 
-    # Maximum 3 local + maximum 1 national.
     selected = (
         local_news[:3]
         + national_news[:1]
@@ -895,6 +932,7 @@ def bale_request(
         result = response.json()
 
     except Exception:
+
         result = {
             "ok": False,
             "description": response.text,
@@ -907,6 +945,7 @@ def bale_request(
             False,
         )
     ):
+
         raise RuntimeError(
             f"Bale API error: {result}"
         )
@@ -919,18 +958,20 @@ def bale_request(
 # ============================================================
 
 def make_reply_markup(
-    news_link
+    news_link,
 ):
 
     return json.dumps(
         {
             "inline_keyboard": [
+
                 [
                     {
                         "text": "🔗 مشاهده خبر",
                         "url": news_link,
                     }
                 ],
+
                 [
                     {
                         "text": "📨 تلگرام",
@@ -1045,6 +1086,7 @@ def send_photo(
         if not content_type.startswith(
             "image/"
         ):
+
             raise RuntimeError(
                 "URL did not return an image"
             )
@@ -1053,6 +1095,7 @@ def send_photo(
 
         if "png" in content_type:
             extension = ".png"
+
         elif "webp" in content_type:
             extension = ".webp"
 
@@ -1082,6 +1125,7 @@ def send_photo(
             f"Photo send failed: {exc}"
         )
 
+        # If image fails, send text instead.
         return send_text(item)
 
 
@@ -1159,11 +1203,14 @@ def main():
         try:
 
             if image_url:
+
                 send_photo(
                     item,
                     image_url,
                 )
+
             else:
+
                 send_text(
                     item
                 )
@@ -1182,6 +1229,7 @@ def main():
                 "استان سیستان و بلوچستان"
             ):
                 local_count += 1
+
             else:
                 national_count += 1
 
