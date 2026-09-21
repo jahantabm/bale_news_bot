@@ -1,281 +1,148 @@
-
-import os
-import re
-import time
-import html
-import hashlib
-import logging
+import os, re, html, time
 from pathlib import Path
-from urllib.parse import urlparse
-
-import requests
+from urllib.parse import urljoin
 import feedparser
+import requests
 from bs4 import BeautifulSoup
 
-BALE_TOKEN = os.getenv("BALE_BOT_TOKEN", "").strip()
-BALE_CHAT_ID = os.getenv("BALE_CHAT_ID", "").strip()
+TOKEN = os.environ["BALE_BOT_TOKEN"]
+CHAT_ID = os.environ["BALE_CHAT_ID"]
+BALE_API = f"https://tapi.bale.ai/bot{TOKEN}"
+SENT_FILE = Path("sent_links.txt")
+MAX_SENT = 3000
+MAX_POSTS_PER_RUN = 8
 
-if not BALE_TOKEN:
-    raise RuntimeError("BALE_BOT_TOKEN is not set")
-if not BALE_CHAT_ID:
-    raise RuntimeError("BALE_CHAT_ID is not set")
-
-API = f"https://tapi.bale.ai/bot{BALE_TOKEN}"
-STATE_FILE = Path("sent_links.txt")
-MAX_SENT = 5000
-
-# Direct RSS feeds. If a feed changes, edit only this list.
-FEEDS = [
-    ("تابناک", "https://www.tabnak.ir/fa/rss/allnews"),
-    ("فرارو", "https://fararu.com/fa/rss/allnews"),
-    ("همشهری آنلاین", "https://www.hamshahrionline.ir/rss"),
-    ("خبر فوری", "https://www.khabarfoori.com/rss"),
-    ("مهر", "https://www.mehrnews.com/rss"),
-    ("ایسنا", "https://www.isna.ir/rss"),
-    ("ایرنا", "https://www.irna.ir/rss"),
-    ("تسنیم", "https://www.tasnimnews.com/fa/rss"),
-]
-
-# Topics requested by the channel owner.
-KEYWORDS = {
-    "ایران و آمریکا": [
-        "ایران", "آمریکا", "امریکا", "ایالات متحده", "واشنگتن",
-        "ترامپ", "پنتاگون", "نیروهای آمریکایی", "پایگاه آمریکا",
-    ],
-    "حزب‌الله لبنان": [
-        "حزب‌الله", "حزب الله", "لبنان", "حزب‌الله لبنان",
-    ],
-    "انصارالله یمن": [
-        "انصارالله", "انصار الله", "حوثی", "حوثی‌ها", "یمن",
-    ],
-    "تنگه هرمز": [
-        "تنگه هرمز", "هرمز", "خلیج فارس", "کشتیرانی", "کشتی",
-        "نفتکش", "نفت‌کش",
-    ],
-    "جنگ و درگیری منطقه‌ای": [
-        "حمله", "موشک", "پهپاد", "درگیری", "جنگ", "حملات",
-        "انفجار", "عملیات نظامی", "آتش‌بس", "حمله هوایی",
-    ],
+FEEDS = {
+    "تابناک": "https://www.tabnak.ir/fa/rss/allnews",
+    "فرارو": "https://fararu.com/fa/rss/allnews",
+    "همشهری آنلاین": "https://www.hamshahrionline.ir/rss",
+    "خبر فوری": "https://www.khabarfoori.com/rss",
+    "آخرین خبر": "https://akharinkhabar.ir/rss",
+    "مهر": "https://www.mehrnews.com/rss",
+    "ایسنا": "https://www.isna.ir/rss",
+    "ایرنا": "https://www.irna.ir/rss",
+    "تسنیم": "https://www.tasnimnews.com/fa/rss",
 }
 
-URGENT = [
-    "فوری", "خبر فوری", "لحظه‌ای", "لحظاتی پیش", "فورا",
-    "حمله", "حملات", "موشک", "پهپاد", "انفجار", "کشته",
-    "آتش‌بس", "عملیات", "بسته شدن", "مسدود", "اعلام جنگ",
+SISTAN_TERMS = [
+    "سیستان و بلوچستان","سیستان","بلوچستان","زاهدان","چابهار","ایرانشهر",
+    "سراوان","زابل","نیکشهر","کنارک","خاش","دلگان","راسک","سرباز",
+    "میرجاوه","هیرمند","زهک","هامون","بمپور","فنوج","قصرقند","دشتیاری",
+    "تفتان","مهرستان","سیب و سوران","بزمان","جنوب شرق","مرز پاکستان",
+    "مرز میرجاوه"
 ]
+URGENT_TERMS = [
+    "فوری","خبر فوری","آنی","لحظه به لحظه","کشته","جان باخت","انفجار",
+    "آتش سوزی","آتش‌سوزی","زلزله","سیل","هشدار","تعطیلی","تعطیل",
+    "قطعی","تصادف","واژگونی","عملیات","حمله","درگیری","بازداشت","حادثه",
+    "مفقود","سقوط","ریزش","مسدود","حمله موشکی","اصابت","ترور",
+    "تصمیم مهم","ابلاغ","تصویب","استعفا","انتخابات"
+]
+NATIONAL_TERMS = [
+    "ایران","تهران","دولت","رئیس جمهور","مجلس","بانک مرکزی","وزارت کشور",
+    "وزارت نفت","وزارت نیرو","وزارت دفاع","نیروهای مسلح","سپاه","ارتش",
+    "پدافند","اقتصاد","ارز","دلار","بورس","بنزین","برق","گاز","نفت","آب",
+    "مدارس","دانشگاه","پرواز","راه آهن","فرودگاه"
+]
+LOW_VALUE_TERMS = ["فال","سرگرمی","آشپزی","مد","لایف استایل","چهره","تبریک","تولد","عکس روز"]
 
-HEADERS = {
-    "User-Agent": "Jahantab-News-Bot/1.0 (+https://github.com/jahantabm/telegram_news_bot)"
-}
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-
-
-def normalize(text: str) -> str:
+def clean_text(text):
     text = html.unescape(text or "")
-    text = re.sub(r"\s+", " ", text)
-    return text.replace("ي", "ی").replace("ك", "ک").strip()
+    text = BeautifulSoup(text, "html.parser").get_text(" ", strip=True)
+    return re.sub(r"\s+", " ", text).strip()
 
+def load_sent():
+    if not SENT_FILE.exists(): return set()
+    return {x.strip() for x in SENT_FILE.read_text(encoding="utf-8").splitlines() if x.strip()}
 
-def load_sent() -> set[str]:
-    if not STATE_FILE.exists():
-        return set()
-    return {x.strip() for x in STATE_FILE.read_text(encoding="utf-8").splitlines() if x.strip()}
+def save_sent(items):
+    vals = list(items)[-MAX_SENT:]
+    SENT_FILE.write_text("\n".join(vals) + ("\n" if vals else ""), encoding="utf-8")
 
+def entry_text(entry):
+    return f'{clean_text(entry.get("title",""))} {clean_text(entry.get("summary","") or entry.get("description",""))}'
 
-def save_sent(items: set[str]):
-    latest = list(items)[-MAX_SENT:]
-    STATE_FILE.write_text("\n".join(latest) + "\n", encoding="utf-8")
+def score_item(text):
+    t = text.lower()
+    sistan = sum(x.lower() in t for x in SISTAN_TERMS)
+    urgent = sum(x.lower() in t for x in URGENT_TERMS)
+    national = sum(x.lower() in t for x in NATIONAL_TERMS)
+    low = sum(x.lower() in t for x in LOW_VALUE_TERMS)
+    score = sistan * 10 + urgent * 6 + national * 2 - low * 8
+    return score, (sistan > 0 or (urgent >= 1 and national >= 1))
 
+def extract_summary(entry):
+    title = clean_text(entry.get("title",""))
+    raw = clean_text(entry.get("summary","") or entry.get("description",""))
+    if not raw: return title
+    sentences = [s.strip() for s in re.split(r"(?<=[.!؟])\s+", raw) if len(s.strip()) > 25]
+    body = sentences[0] if sentences else raw
+    return body if len(body) <= 280 else body[:277].rsplit(" ",1)[0] + "..."
 
-def strip_html(text: str) -> str:
-    return normalize(BeautifulSoup(text or "", "html.parser").get_text(" "))
-
-
-def entry_text(entry) -> str:
-    title = normalize(entry.get("title", ""))
-    summary = strip_html(entry.get("summary", "") or entry.get("description", ""))
-    return f"{title} {summary}"
-
-
-def find_topics(text: str) -> list[str]:
-    hits = []
-    for topic, words in KEYWORDS.items():
-        if any(w in text for w in words):
-            hits.append(topic)
-    return hits
-
-
-def score_item(title: str, text: str, topics: list[str]) -> int:
-    score = min(len(topics) * 3, 12)
-    low = f"{title} {text}"
-    score += sum(2 for w in URGENT if w in low)
-    if "فوری" in title or "لحظه‌ای" in title:
-        score += 5
-    return score
-
-
-def get_image(entry, article_url: str) -> str | None:
-    # RSS media/enclosure first.
-    for key in ("media_content", "media_thumbnail"):
-        for item in entry.get(key, []) or []:
-            url = item.get("url")
-            if url and url.startswith("http"):
-                return url
-
-    enclosure = entry.get("enclosures", []) or []
-    for item in enclosure:
-        url = item.get("href") or item.get("url")
-        if url and ("image" in item.get("type", "") or url.lower().split("?")[0].endswith((".jpg", ".jpeg", ".png", ".webp"))):
-            return url
-
-    # Fallback: inspect article og:image.
+def find_image(entry):
+    for key in ("media_content","media_thumbnail"):
+        media = entry.get(key) or []
+        if media and media[0].get("url"): return media[0]["url"]
+    for enc in entry.get("enclosures",[]) or []:
+        url = enc.get("href") or enc.get("url")
+        if url and ("image" in (enc.get("type") or "").lower() or not enc.get("type")): return url
+    link = entry.get("link")
+    if not link: return None
     try:
-        r = requests.get(article_url, headers=HEADERS, timeout=12)
-        r.raise_for_status()
+        r = requests.get(link, timeout=12, headers={"User-Agent":"Mozilla/5.0"})
         soup = BeautifulSoup(r.text, "html.parser")
-        tag = soup.find("meta", property="og:image") or soup.find("meta", attrs={"name": "twitter:image"})
-        if tag and tag.get("content", "").startswith("http"):
-            return tag["content"]
-    except Exception as exc:
-        logging.warning("image lookup failed: %s", exc)
-    return None
+        og = soup.find("meta", property="og:image")
+        return urljoin(link, og["content"]) if og and og.get("content") else None
+    except Exception:
+        return None
 
+def send_message(text, url):
+    payload = {"chat_id": CHAT_ID, "text": text,
+               "reply_markup":{"inline_keyboard":[[{"text":"🔗 مشاهده خبر","url":url}]]}}
+    requests.post(f"{BALE_API}/sendMessage", json=payload, timeout=20).raise_for_status()
 
-def make_summary(entry, title: str) -> str:
-    raw = strip_html(entry.get("summary", "") or entry.get("description", ""))
-    if not raw:
-        return "جزئیات بیشتر در منبع اصلی خبر منتشر شده است."
+def send_photo(image_url, caption, url):
+    payload = {"chat_id":CHAT_ID,"photo":image_url,"caption":caption,
+               "reply_markup":{"inline_keyboard":[[{"text":"🔗 مشاهده خبر","url":url}]]}}
+    requests.post(f"{BALE_API}/sendPhoto", json=payload, timeout=25).raise_for_status()
 
-    # Extractive, source-faithful summary: no invented facts.
-    sentences = re.split(r"(?<=[.!؟])\s+", raw)
-    sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
-    summary = " ".join(sentences[:3])
-    if len(summary) > 650:
-        summary = summary[:647].rsplit(" ", 1)[0] + "..."
-    return summary
-
-
-def source_domain(url: str) -> str:
-    return urlparse(url).netloc.replace("www.", "")
-
-
-def build_caption(source: str, title: str, summary: str, topics: list[str]) -> str:
-    topic = "، ".join(topics[:3])
-    caption = (
-        f"🔴 {title}\n\n"
-        f"{summary}\n\n"
-        f"📰 منبع: {source}\n"
-        f"🏷 موضوع: {topic}\n\n"
-        f"جهان‌تاب | اخبار مهم و فوری"
-    )
-    return caption[:1000]
-
-
-def bale_call(method: str, payload: dict, files=None) -> dict:
-    url = f"{API}/{method}"
-    if files:
-        r = requests.post(url, data=payload, files=files, timeout=30)
-    else:
-        r = requests.post(url, json=payload, timeout=30)
-    r.raise_for_status()
-    data = r.json()
-    if not data.get("ok"):
-        raise RuntimeError(data.get("description", str(data)))
-    return data
-
-
-def send_news(caption: str, article_url: str, image_url: str | None):
-    markup = {
-        "inline_keyboard": [[
-            {"text": "🔗 مشاهده خبر", "url": article_url}
-        ]]
-    }
-
-    if image_url:
+def publish(source, entry):
+    title = clean_text(entry.get("title",""))
+    url = (entry.get("link") or "").strip()
+    caption = f"📰 {title}\n\n{extract_summary(entry)}\n\nمنبع: {source}"
+    image = find_image(entry)
+    if image:
         try:
-            bale_call("sendPhoto", {
-                "chat_id": BALE_CHAT_ID,
-                "photo": image_url,
-                "caption": caption,
-                "reply_markup": markup,
-            })
-            return
-        except Exception as exc:
-            logging.warning("sendPhoto with URL failed; falling back to text: %s", exc)
-
-    bale_call("sendMessage", {
-        "chat_id": BALE_CHAT_ID,
-        "text": caption,
-        "reply_markup": markup,
-    })
-
-
-def fetch_feed(source: str, url: str):
-    try:
-        response = requests.get(url, headers=HEADERS, timeout=20)
-        response.raise_for_status()
-        feed = feedparser.parse(response.content)
-        if getattr(feed, "bozo", 0) and not feed.entries:
-            raise RuntimeError("invalid RSS")
-        return feed.entries[:20]
-    except Exception as exc:
-        logging.warning("feed failed [%s] %s: %s", source, url, exc)
-        return []
-
-
-def stable_id(url: str, title: str) -> str:
-    return hashlib.sha256((url or title).encode("utf-8")).hexdigest()
-
+            send_photo(image, caption, url); return
+        except Exception:
+            pass
+    send_message(caption, url)
 
 def main():
     sent = load_sent()
     candidates = []
-
-    for source, feed_url in FEEDS:
-        for entry in fetch_feed(source, feed_url):
-            title = normalize(entry.get("title", ""))
-            url = entry.get("link", "").strip()
-            if not title or not url:
-                continue
-
-            sid = stable_id(url, title)
-            if sid in sent:
-                continue
-
-            text = entry_text(entry)
-            topics = find_topics(text)
-            if not topics:
-                continue
-
-            score = score_item(title, text, topics)
-            if score < 5:
-                continue
-
-            candidates.append((score, source, title, url, entry, topics, sid))
-
-    # Most relevant first, then limit each run.
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    candidates = candidates[:8]
-
-    if not candidates:
-        logging.info("No new relevant news.")
-        return
-
-    for score, source, title, url, entry, topics, sid in candidates:
+    for source, feed_url in FEEDS.items():
         try:
-            summary = make_summary(entry, title)
-            image = get_image(entry, url)
-            caption = build_caption(source, title, summary, topics)
-            send_news(caption, url, image)
-            sent.add(sid)
-            logging.info("sent: [%s] %s", source, title)
-            time.sleep(1.5)
+            feed = feedparser.parse(feed_url)
+            for entry in feed.entries[:40]:
+                url = (entry.get("link") or "").strip()
+                if not url or url in sent: continue
+                score, accepted = score_item(entry_text(entry))
+                if accepted: candidates.append((score, source, entry))
         except Exception as exc:
-            logging.exception("failed to publish %s: %s", title, exc)
-
+            print(f"[WARN] {source}: {exc}")
+    candidates.sort(key=lambda x:x[0], reverse=True)
+    published = 0
+    for _, source, entry in candidates:
+        url = (entry.get("link") or "").strip()
+        if not url or url in sent: continue
+        try:
+            publish(source, entry); sent.add(url); published += 1; time.sleep(1)
+            if published >= MAX_POSTS_PER_RUN: break
+        except Exception as exc:
+            print(f"[WARN] publish failed: {url} -> {exc}")
     save_sent(sent)
-
+    print(f"Published: {published}; tracked links: {len(sent)}")
 
 if __name__ == "__main__":
     main()
