@@ -27,27 +27,46 @@ if not CHAT_ID:
 
 
 # ============================================================
+# SOCIAL CHANNELS
+# ============================================================
+
+TELEGRAM_LINK = "https://t.me/Jahantab_news"
+BALE_LINK = "https://ble.ir/jahantabnews"
+SOROUSH_LINK = "https://splus.ir/jahantabnews"
+
+
+# ============================================================
 # APPROVED INTERNAL SOURCES
+# ============================================================
+#
+# فقط لینک‌هایی که دامنه آنها در این فهرست باشد منتشر می‌شوند.
 # ============================================================
 
 APPROVED_DOMAINS = {
-    "tabnak.ir",
-    "asriran.com",
+    "irna.ir",
     "isna.ir",
     "mehrnews.com",
     "tasnimnews.com",
+    "farsnews.ir",
+    "tabnak.ir",
+    "asriran.com",
+    "fararu.com",
+    "jahannews.com",
+    "khabarfouri.com",
+    "akharinkhabar.ir",
+    "roozplus.com",
     "khabaronline.ir",
 }
 
 
+# ============================================================
+# RSS SOURCES
+# ============================================================
+
 RSS_FEEDS = [
     {
-        "name": "تابناک",
-        "url": "https://www.tabnak.ir/fa/rss/allnews",
-    },
-    {
-        "name": "عصر ایران",
-        "url": "https://www.asriran.com/fa/rss/allnews",
+        "name": "ایرنا",
+        "url": "https://www.irna.ir/rss",
     },
     {
         "name": "ایسنا",
@@ -58,11 +77,16 @@ RSS_FEEDS = [
         "url": "https://www.mehrnews.com/rss",
     },
     {
-        "name": "تسنیم",
-        "url": (
-            "https://www.tasnimnews.com/fa/rss/feed/"
-            "0/8/0/%D9%85%D9%87%D9%85%D8%AA%D8%B1%DB%8C%D9%86-%D8%A7%D8%AE%D8%A8%D8%A7%D8%B1-%D8%AA%D8%B3%D9%86%DB%8C%D9%85"
-        ),
+        "name": "تابناک",
+        "url": "https://www.tabnak.ir/fa/rss/allnews",
+    },
+    {
+        "name": "عصر ایران",
+        "url": "https://www.asriran.com/fa/rss/allnews",
+    },
+    {
+        "name": "فرارو",
+        "url": "https://fararu.com/fa/rss",
     },
     {
         "name": "خبرآنلاین",
@@ -72,22 +96,13 @@ RSS_FEEDS = [
 
 
 # ============================================================
-# SOCIAL LINKS
-# ============================================================
-
-TELEGRAM_LINK = "https://t.me/jahantab_news"
-BALE_LINK = "https://ble.ir/jahantabnews"
-SOROUSH_LINK = "https://splus.ir/jahantabnews"
-
-
-# ============================================================
-# SISTAN AND BALUCHESTAN
+# SISTAN & BALUCHESTAN + MAKran
 # ============================================================
 
 SISTAN_KEYWORDS = [
+    "سیستان و بلوچستان",
     "سیستان",
     "بلوچستان",
-    "سیستان و بلوچستان",
     "زاهدان",
     "زابل",
     "چابهار",
@@ -112,40 +127,130 @@ SISTAN_KEYWORDS = [
     "سیب و سوران",
     "نیمروز",
     "بنت",
+    "لاشار",
+    "دشتک",
+    "کورین",
+    "نوک‌آباد",
+    "بزمان",
+    "گشت",
+    "پلان",
+    "تلنگ",
+    "زرآباد",
+    "بخش زرآباد",
+    "ساحل مکران",
+    "سواحل مکران",
+    "مکران",
+    "دریای عمان",
 ]
 
 
 # ============================================================
-# IMPORTANT / URGENT IRAN
+# VERY IMPORTANT NATIONAL NEWS
+# ============================================================
+#
+# این فهرست عمداً محدود است.
+# خبر عادی سیاسی/اقتصادی/ورزشی وارد بخش ایران نمی‌شود.
 # ============================================================
 
-URGENT_KEYWORDS = [
-    "فوری",
-    "خبر فوری",
-    "لحظه‌ای",
-    "لحظاتی پیش",
-    "هشدار",
-    "زلزله",
-    "سیل",
-    "طوفان",
-    "انفجار",
-    "آتش‌سوزی",
-    "حادثه",
-    "حمله",
-    "درگیری",
-    "تعطیلی سراسری",
-    "قطعی گسترده",
-    "تصمیم مهم",
-    "تصمیم جدید",
-    "اعلام شد",
-    "لغو شد",
-    "آغاز شد",
-    "پایان یافت",
+NATIONAL_CRISIS_KEYWORDS = [
+    "جنگ ایران و آمریکا",
+    "جنگ ایران و اسرائیل",
+    "جنگ ایران آمریکا",
+    "جنگ ایران اسرائیل",
+    "درگیری ایران و آمریکا",
+    "درگیری ایران و اسرائیل",
+    "درگیری ایران با آمریکا",
+    "درگیری ایران با اسرائیل",
+
+    "حمله آمریکا به ایران",
+    "حمله اسرائیل به ایران",
+    "حمله آمریکا به ایران",
+    "حمله اسرائیل به خاک ایران",
+    "حمله نظامی به ایران",
+
+    "حمله ایران به آمریکا",
+    "حمله ایران به اسرائیل",
+    "حمله ایران به پایگاه آمریکا",
+    "حمله ایران به پایگاه‌های آمریکا",
+    "حمله ایران به اسرائیل",
+
+    "حمله موشکی به ایران",
+    "حمله هوایی به ایران",
+    "حملات هوایی به ایران",
+    "حملات موشکی به ایران",
+
+    "موشک ایران",
+    "موشک‌های ایران",
+    "موشک به اسرائیل",
+    "موشک به آمریکا",
+
+    "پایگاه آمریکا",
+    "پایگاه‌های آمریکا",
+    "پایگاه آمریکایی",
+
+    "تأسیسات هسته‌ای ایران",
+    "تاسیسات هسته‌ای ایران",
+    "حمله به تأسیسات هسته‌ای",
+    "حمله به تاسیسات هسته‌ای",
+
+    "حمله به نیروگاه",
+    "حمله به تأسیسات ایران",
+    "حمله به تاسیسات ایران",
+
+    "بمباران ایران",
+    "بمباران اسرائیل",
+    "بمباران آمریکا",
+
+    "آتش‌بس ایران و اسرائیل",
+    "آتش‌بس ایران و آمریکا",
+    "آتش بس ایران و اسرائیل",
+    "آتش بس ایران و آمریکا",
+
+    "مذاکرات ایران و آمریکا",
+    "توافق ایران و آمریکا",
+
+    "مذاکرات ایران و اسرائیل",
+    "توافق ایران و اسرائیل",
+
+    "اعلام جنگ",
+    "آغاز جنگ",
+    "پایان جنگ",
+
+    "حمله گسترده به ایران",
+    "حمله گسترده اسرائیل",
+    "حمله گسترده آمریکا",
+
+    "عملیات نظامی علیه ایران",
+    "عملیات نظامی اسرائیل علیه ایران",
+    "عملیات نظامی آمریکا علیه ایران",
+
+    "ترور مقام ایرانی",
+    "ترور فرمانده ایرانی",
+
+    "حمله به مراکز نظامی ایران",
+    "حمله به پایگاه نظامی ایران",
+
+    "وضعیت فوق‌العاده",
+    "شرایط جنگی",
+]
+
+
+# کلمات تأییدکننده برای جلوگیری از اشتباه
+IRAN_CONFIRMATION_KEYWORDS = [
+    "ایران",
+    "تهران",
+    "اسرائیل",
+    "آمریکا",
+    "آمریکایی",
+    "اسرائیلی",
+    "سپاه",
+    "نیروهای مسلح",
+    "ارتش جمهوری اسلامی",
 ]
 
 
 # ============================================================
-# TEXT HELPERS
+# TEXT CLEANING
 # ============================================================
 
 def clean_text(value):
@@ -173,6 +278,10 @@ def clean_text(value):
     return value.strip()
 
 
+# ============================================================
+# URL
+# ============================================================
+
 def normalize_url(url):
     if not url:
         return ""
@@ -198,6 +307,9 @@ def get_domain(url):
 
 def is_approved_source(url):
     domain = get_domain(url)
+
+    if not domain:
+        return False
 
     if domain in APPROVED_DOMAINS:
         return True
@@ -309,9 +421,15 @@ def make_summary(entry):
     if not description:
         return ""
 
-    if len(description) > 450:
+    description = re.sub(
+        r"\s*\.\.\.\s*$",
+        "",
+        description,
+    )
+
+    if len(description) > 500:
         description = (
-            description[:447]
+            description[:497]
             .rsplit(" ", 1)[0]
             + "..."
         )
@@ -420,13 +538,24 @@ def is_sistan_news(title, summary):
     )
 
 
-def is_important_iran_news(title, summary):
+def national_news_score(title, summary):
     text = f"{title} {summary}"
 
-    return any(
+    score = 0
+
+    for keyword in NATIONAL_CRISIS_KEYWORDS:
+        if keyword in text:
+            score += 10
+
+    confirmation = any(
         keyword in text
-        for keyword in URGENT_KEYWORDS
+        for keyword in IRAN_CONFIRMATION_KEYWORDS
     )
+
+    if not confirmation:
+        return 0
+
+    return score
 
 
 def classify_news(title, summary):
@@ -434,12 +563,12 @@ def classify_news(title, summary):
         title,
         summary,
     ):
-        return "سیستان و بلوچستان"
+        return "استان سیستان و بلوچستان"
 
-    if is_important_iran_news(
+    if national_news_score(
         title,
         summary,
-    ):
+    ) >= 10:
         return "ایران"
 
     return None
@@ -489,7 +618,10 @@ def collect_news():
             if not title or not link:
                 continue
 
-            # Only approved internal sources
+            # ----------------------------------------------
+            # HARD SOURCE FILTER
+            # ----------------------------------------------
+
             if not is_approved_source(link):
                 print(
                     "Rejected source:",
@@ -523,6 +655,23 @@ def collect_news():
 
             seen.add(link)
 
+            score = 0
+
+            if category == "استان سیستان و بلوچستان":
+                score = 100
+
+                for keyword in SISTAN_KEYWORDS:
+                    if keyword in (
+                        f"{title} {summary}"
+                    ):
+                        score += 2
+
+            else:
+                score = national_news_score(
+                    title,
+                    summary,
+                )
+
             collected.append(
                 {
                     "title": title,
@@ -533,16 +682,58 @@ def collect_news():
                     ),
                     "category": category,
                     "source": source["name"],
+                    "score": score,
                 }
             )
 
-    collected.sort(
-        key=lambda item:
+    return collected
+
+
+# ============================================================
+# SELECT EXACTLY:
+# 3 LOCAL + 1 NATIONAL
+# ============================================================
+
+def select_news(news):
+    local_news = [
+        item
+        for item in news
+        if item["category"]
+        == "استان سیستان و بلوچستان"
+    ]
+
+    national_news = [
+        item
+        for item in news
+        if item["category"]
+        == "ایران"
+    ]
+
+    local_news.sort(
+        key=lambda item: (
+            item["score"],
             item["published"],
+        ),
         reverse=True,
     )
 
-    return collected
+    national_news.sort(
+        key=lambda item: (
+            item["score"],
+            item["published"],
+        ),
+        reverse=True,
+    )
+
+    selected_local = local_news[:3]
+    selected_national = national_news[:1]
+
+    selected = (
+        selected_local
+        + selected_national
+    )
+
+    return selected
 
 
 # ============================================================
@@ -590,15 +781,36 @@ def bale_request(
 
 
 # ============================================================
-# SOCIAL FOOTER
+# SOCIAL BUTTONS
 # ============================================================
 
-def social_footer():
-    return (
-        "📱 جهان‌تاب\n"
-        f"📨 تلگرام: {TELEGRAM_LINK}\n"
-        f"🟦 بله: {BALE_LINK}\n"
-        f"🟠 سروش: {SOROUSH_LINK}"
+def make_reply_markup(news_link):
+    return json.dumps(
+        {
+            "inline_keyboard": [
+                [
+                    {
+                        "text": "🔗 مشاهده خبر",
+                        "url": news_link,
+                    }
+                ],
+                [
+                    {
+                        "text": "📨 تلگرام",
+                        "url": TELEGRAM_LINK,
+                    },
+                    {
+                        "text": "🟦 بله",
+                        "url": BALE_LINK,
+                    },
+                    {
+                        "text": "🟠 سروش",
+                        "url": SOROUSH_LINK,
+                    },
+                ],
+            ]
+        },
+        ensure_ascii=False,
     )
 
 
@@ -621,29 +833,16 @@ def send_text(item):
 
     if summary:
         text += (
-            summary
-            + "\n\n"
+            f"{summary}\n\n"
         )
 
     text += (
         f"🗞 منبع: {source}\n\n"
-        f"🔗 مشاهده خبر\n"
-        f"{link}\n\n"
-        f"{social_footer()}"
+        f"🌐 جهان‌تاب"
     )
 
-    reply_markup = json.dumps(
-        {
-            "inline_keyboard": [
-                [
-                    {
-                        "text": "مشاهده خبر",
-                        "url": link,
-                    }
-                ]
-            ]
-        },
-        ensure_ascii=False,
+    reply_markup = make_reply_markup(
+        link
     )
 
     return bale_request(
@@ -678,30 +877,19 @@ def send_photo(
 
     if summary:
         caption += (
-            summary
-            + "\n\n"
+            f"{summary}\n\n"
         )
 
     caption += (
         f"🗞 منبع: {source}\n\n"
-        f"🔗 مشاهده متن کامل خبر\n\n"
-        f"{social_footer()}"
+        f"🌐 جهان‌تاب"
     )
 
+    # Bale caption limit
     caption = caption[:1000]
 
-    reply_markup = json.dumps(
-        {
-            "inline_keyboard": [
-                [
-                    {
-                        "text": "مشاهده خبر",
-                        "url": link,
-                    }
-                ]
-            ]
-        },
-        ensure_ascii=False,
+    reply_markup = make_reply_markup(
+        link
     )
 
     try:
@@ -798,17 +986,33 @@ def main():
         f"{len(news)}"
     )
 
+    selected = select_news(
+        news
+    )
+
+    print(
+        f"Selected news: "
+        f"{len(selected)}"
+    )
+
+    local_count = 0
+    national_count = 0
     new_count = 0
 
-    for item in news[:5]:
+    for item in selected:
 
         link = item["link"]
 
         if link in sent_links:
+            print(
+                "Already sent:",
+                item["title"],
+            )
             continue
 
         print(
             f"Publishing: "
+            f"[{item['category']}] "
             f"[{item['source']}] "
             f"{item['title']}"
         )
@@ -844,6 +1048,13 @@ def main():
 
             new_count += 1
 
+            if item["category"] == (
+                "استان سیستان و بلوچستان"
+            ):
+                local_count += 1
+            else:
+                national_count += 1
+
             print(
                 "Published successfully."
             )
@@ -856,8 +1067,26 @@ def main():
             )
 
     print(
+        "-----------------------------------"
+    )
+
+    print(
+        f"Local published: "
+        f"{local_count}"
+    )
+
+    print(
+        f"National published: "
+        f"{national_count}"
+    )
+
+    print(
         f"New published news: "
         f"{new_count}"
+    )
+
+    print(
+        "==================================="
     )
 
 
