@@ -72,7 +72,16 @@ RSS_FEEDS = [
 
 
 # ============================================================
-# SIستان و بلوچستان
+# SOCIAL LINKS
+# ============================================================
+
+TELEGRAM_LINK = "https://t.me/jahantab_newd"
+BALE_LINK = "https://ble.ir/jahantabnews"
+SOROUSH_LINK = "https://splus.ir/jahantabnews"
+
+
+# ============================================================
+# SISTAN AND BALUCHESTAN
 # ============================================================
 
 SISTAN_KEYWORDS = [
@@ -136,7 +145,7 @@ URGENT_KEYWORDS = [
 
 
 # ============================================================
-# TEXT
+# TEXT HELPERS
 # ============================================================
 
 def clean_text(value):
@@ -437,7 +446,7 @@ def classify_news(title, summary):
 
 
 # ============================================================
-# COLLECT
+# COLLECT NEWS
 # ============================================================
 
 def collect_news():
@@ -480,10 +489,7 @@ def collect_news():
             if not title or not link:
                 continue
 
-            # ----------------------------------------------
-            # HARD SOURCE FILTER
-            # ----------------------------------------------
-
+            # Only approved internal sources
             if not is_approved_source(link):
                 print(
                     "Rejected source:",
@@ -562,6 +568,7 @@ def bale_request(
 
     try:
         result = response.json()
+
     except Exception:
         result = {
             "ok": False,
@@ -570,7 +577,10 @@ def bale_request(
 
     if (
         not response.ok
-        or not result.get("ok", False)
+        or not result.get(
+            "ok",
+            False,
+        )
     ):
         raise RuntimeError(
             f"Bale API error: {result}"
@@ -580,10 +590,24 @@ def bale_request(
 
 
 # ============================================================
+# SOCIAL FOOTER
+# ============================================================
+
+def social_footer():
+    return (
+        "📱 جهان‌تاب\n"
+        f"📨 تلگرام: {TELEGRAM_LINK}\n"
+        f"🟦 بله: {BALE_LINK}\n"
+        f"🟠 سروش: {SOROUSH_LINK}"
+    )
+
+
+# ============================================================
 # SEND TEXT
 # ============================================================
 
 def send_text(item):
+
     title = item["title"]
     summary = item["summary"]
     link = item["link"]
@@ -603,7 +627,9 @@ def send_text(item):
 
     text += (
         f"🗞 منبع: {source}\n\n"
-        f"🔗 مشاهده خبر"
+        f"🔗 مشاهده خبر\n"
+        f"{link}\n\n"
+        f"{social_footer()}"
     )
 
     reply_markup = json.dumps(
@@ -638,6 +664,7 @@ def send_photo(
     item,
     image_url,
 ):
+
     title = item["title"]
     summary = item["summary"]
     link = item["link"]
@@ -657,7 +684,8 @@ def send_photo(
 
     caption += (
         f"🗞 منبع: {source}\n\n"
-        f"🔗 مشاهده متن کامل خبر"
+        f"🔗 مشاهده متن کامل خبر\n\n"
+        f"{social_footer()}"
     )
 
     caption = caption[:1000]
@@ -677,6 +705,7 @@ def send_photo(
     )
 
     try:
+
         image_response = requests.get(
             image_url,
             timeout=15,
@@ -706,6 +735,7 @@ def send_photo(
 
         if "png" in content_type:
             extension = ".png"
+
         elif "webp" in content_type:
             extension = ".webp"
 
@@ -728,6 +758,7 @@ def send_photo(
         )
 
     except Exception as exc:
+
         print(
             f"Photo send failed: {exc}"
         )
@@ -740,12 +771,15 @@ def send_photo(
 # ============================================================
 
 def main():
+
     print(
         "==================================="
     )
+
     print(
         "Jahantab Bale News Bot"
     )
+
     print(
         "==================================="
     )
@@ -780,20 +814,33 @@ def main():
         )
 
         image_url = (
-            get_image_from_article(link)
+            get_image_from_article(
+                link
+            )
         )
 
         try:
+
             if image_url:
+
                 send_photo(
                     item,
                     image_url,
                 )
-            else:
-                send_text(item)
 
-            save_sent_link(link)
-            sent_links.add(link)
+            else:
+
+                send_text(
+                    item
+                )
+
+            save_sent_link(
+                link
+            )
+
+            sent_links.add(
+                link
+            )
 
             new_count += 1
 
@@ -802,6 +849,7 @@ def main():
             )
 
         except Exception as exc:
+
             print(
                 f"Publish failed: "
                 f"{exc}"
