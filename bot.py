@@ -10,6 +10,10 @@ import feedparser
 from bs4 import BeautifulSoup
 
 
+# ============================================================
+# CONFIG
+# ============================================================
+
 BOT_TOKEN = os.getenv("BALE_BOT_TOKEN")
 CHAT_ID = os.getenv("BALE_CHAT_ID")
 
@@ -21,6 +25,10 @@ if not BOT_TOKEN:
 if not CHAT_ID:
     raise RuntimeError("BALE_CHAT_ID is not set")
 
+
+# ============================================================
+# RSS FEEDS
+# ============================================================
 
 SISTAN_FEEDS = [
     "https://news.google.com/rss/search?q="
@@ -48,6 +56,10 @@ IRAN_FEEDS = [
     + "&hl=fa&gl=IR&ceid=IR:fa",
 ]
 
+
+# ============================================================
+# KEYWORDS
+# ============================================================
 
 SISTAN_KEYWORDS = [
     "سیستان",
@@ -128,14 +140,31 @@ IMPORTANT_IRAN_KEYWORDS = [
 ]
 
 
+# ============================================================
+# TEXT HELPERS
+# ============================================================
+
 def clean_text(value):
     if not value:
         return ""
 
     value = html.unescape(value)
-    soup = BeautifulSoup(value, "html.parser")
-    value = soup.get_text(" ", strip=True)
-    value = re.sub(r"\s+", " ", value)
+
+    soup = BeautifulSoup(
+        value,
+        "html.parser",
+    )
+
+    value = soup.get_text(
+        " ",
+        strip=True,
+    )
+
+    value = re.sub(
+        r"\s+",
+        " ",
+        value,
+    )
 
     return value.strip()
 
@@ -155,11 +184,19 @@ def normalize_url(url):
     return url.rstrip("?&")
 
 
+# ============================================================
+# STATE
+# ============================================================
+
 def load_sent_links():
     if not os.path.exists(STATE_FILE):
         return set()
 
-    with open(STATE_FILE, "r", encoding="utf-8") as file:
+    with open(
+        STATE_FILE,
+        "r",
+        encoding="utf-8",
+    ) as file:
         return {
             line.strip()
             for line in file
@@ -168,13 +205,25 @@ def load_sent_links():
 
 
 def save_sent_link(link):
-    with open(STATE_FILE, "a", encoding="utf-8") as file:
+    with open(
+        STATE_FILE,
+        "a",
+        encoding="utf-8",
+    ) as file:
         file.write(link + "\n")
 
 
+# ============================================================
+# DATE
+# ============================================================
+
 def parse_date(entry):
     try:
-        if getattr(entry, "published_parsed", None):
+        if getattr(
+            entry,
+            "published_parsed",
+            None,
+        ):
             import calendar
 
             timestamp = calendar.timegm(
@@ -186,7 +235,11 @@ def parse_date(entry):
                 tz=timezone.utc,
             )
 
-        if getattr(entry, "updated_parsed", None):
+        if getattr(
+            entry,
+            "updated_parsed",
+            None,
+        ):
             import calendar
 
             timestamp = calendar.timegm(
@@ -203,6 +256,10 @@ def parse_date(entry):
 
     return datetime.now(timezone.utc)
 
+
+# ============================================================
+# IMAGE
+# ============================================================
 
 def get_image_from_article(url):
     if not url:
@@ -237,23 +294,37 @@ def get_image_from_article(url):
 
         image = soup.find(
             "meta",
-            attrs={"name": "twitter:image"},
+            attrs={
+                "name": "twitter:image"
+            },
         )
 
         if image and image.get("content"):
             return image["content"].strip()
 
     except Exception as exc:
-        print(f"Image lookup failed: {exc}")
+        print(
+            f"Image lookup failed: {exc}"
+        )
 
     return None
 
 
+# ============================================================
+# SUMMARY
+# ============================================================
+
 def make_summary(entry):
     description = ""
 
-    if getattr(entry, "summary", None):
-        description = clean_text(entry.summary)
+    if getattr(
+        entry,
+        "summary",
+        None,
+    ):
+        description = clean_text(
+            entry.summary
+        )
 
     if not description and getattr(
         entry,
@@ -283,7 +354,14 @@ def make_summary(entry):
     return description
 
 
-def score_sistan(title, summary):
+# ============================================================
+# SCORING
+# ============================================================
+
+def score_sistan(
+    title,
+    summary,
+):
     text = f"{title} {summary}"
 
     score = 0
@@ -299,7 +377,10 @@ def score_sistan(title, summary):
     return score
 
 
-def score_iran(title, summary):
+def score_iran(
+    title,
+    summary,
+):
     text = f"{title} {summary}"
 
     score = 0
@@ -310,6 +391,10 @@ def score_iran(title, summary):
 
     return score
 
+
+# ============================================================
+# RSS
+# ============================================================
 
 def fetch_feed(url):
     try:
@@ -326,45 +411,114 @@ def fetch_feed(url):
 
         response.raise_for_status()
 
-        return feedparser.parse(
+        feed = feedparser.parse(
             response.content
         )
 
+        print(
+            f"RSS URL: {url}"
+        )
+
+        print(
+            f"RSS entries: "
+            f"{len(feed.entries)}"
+        )
+
+        if getattr(
+            feed,
+            "bozo",
+            False,
+        ):
+            print(
+                "RSS parse warning:",
+                feed.bozo_exception,
+            )
+
+        if feed.entries:
+            for entry in feed.entries[:3]:
+                print(
+                    "RSS title:",
+                    clean_text(
+                        getattr(
+                            entry,
+                            "title",
+                            "",
+                        )
+                    ),
+                )
+
+        return feed
+
     except Exception as exc:
-        print(f"Feed error: {exc}")
+        print(
+            f"Feed error: {exc}"
+        )
+
         return None
 
 
+# ============================================================
+# COLLECT NEWS
+# ============================================================
+
 def collect_news():
-    now = datetime.now(timezone.utc)
-    max_age = timedelta(hours=18)
+    now = datetime.now(
+        timezone.utc
+    )
+
+    max_age = timedelta(
+        hours=18
+    )
 
     collected = []
 
+    # --------------------------------------------------------
+    # Sistan & Baluchestan
+    # --------------------------------------------------------
+
     for feed_url in SISTAN_FEEDS:
-        feed = fetch_feed(feed_url)
+
+        feed = fetch_feed(
+            feed_url
+        )
 
         if not feed:
             continue
 
         for entry in feed.entries:
+
             title = clean_text(
-                getattr(entry, "title", "")
+                getattr(
+                    entry,
+                    "title",
+                    "",
+                )
             )
 
             link = normalize_url(
-                getattr(entry, "link", "")
+                getattr(
+                    entry,
+                    "link",
+                    "",
+                )
             )
 
             if not title or not link:
                 continue
 
-            published = parse_date(entry)
+            published = parse_date(
+                entry
+            )
 
-            if now - published > max_age:
+            if (
+                now - published
+                > max_age
+            ):
                 continue
 
-            summary = make_summary(entry)
+            summary = make_summary(
+                entry
+            )
 
             score = score_sistan(
                 title,
@@ -374,39 +528,66 @@ def collect_news():
             if score < 2:
                 continue
 
-            collected.append({
-                "title": title,
-                "summary": summary,
-                "link": link,
-                "published": published,
-                "category": "سیستان و بلوچستان",
-                "score": score,
-            })
+            collected.append(
+                {
+                    "title": title,
+                    "summary": summary,
+                    "link": link,
+                    "published": published,
+                    "category": (
+                        "سیستان و بلوچستان"
+                    ),
+                    "score": score,
+                }
+            )
+
+    # --------------------------------------------------------
+    # Important Iran
+    # --------------------------------------------------------
 
     for feed_url in IRAN_FEEDS:
-        feed = fetch_feed(feed_url)
+
+        feed = fetch_feed(
+            feed_url
+        )
 
         if not feed:
             continue
 
         for entry in feed.entries:
+
             title = clean_text(
-                getattr(entry, "title", "")
+                getattr(
+                    entry,
+                    "title",
+                    "",
+                )
             )
 
             link = normalize_url(
-                getattr(entry, "link", "")
+                getattr(
+                    entry,
+                    "link",
+                    "",
+                )
             )
 
             if not title or not link:
                 continue
 
-            published = parse_date(entry)
+            published = parse_date(
+                entry
+            )
 
-            if now - published > max_age:
+            if (
+                now - published
+                > max_age
+            ):
                 continue
 
-            summary = make_summary(entry)
+            summary = make_summary(
+                entry
+            )
 
             score = score_iran(
                 title,
@@ -416,14 +597,16 @@ def collect_news():
             if score < 2:
                 continue
 
-            collected.append({
-                "title": title,
-                "summary": summary,
-                "link": link,
-                "published": published,
-                "category": "ایران",
-                "score": score,
-            })
+            collected.append(
+                {
+                    "title": title,
+                    "summary": summary,
+                    "link": link,
+                    "published": published,
+                    "category": "ایران",
+                    "score": score,
+                }
+            )
 
     collected.sort(
         key=lambda item: (
@@ -436,17 +619,25 @@ def collect_news():
     unique = {}
 
     for item in collected:
+
         if item["link"] not in unique:
             unique[item["link"]] = item
 
-    return list(unique.values())
+    return list(
+        unique.values()
+    )
 
+
+# ============================================================
+# BALE API
+# ============================================================
 
 def bale_request(
     method,
     data=None,
     files=None,
 ):
+
     url = (
         f"https://tapi.bale.ai/"
         f"bot{BOT_TOKEN}/{method}"
@@ -461,6 +652,7 @@ def bale_request(
 
     try:
         result = response.json()
+
     except Exception:
         result = {
             "ok": False,
@@ -469,7 +661,10 @@ def bale_request(
 
     if (
         not response.ok
-        or not result.get("ok", False)
+        or not result.get(
+            "ok",
+            False,
+        )
     ):
         raise RuntimeError(
             f"Bale API error: {result}"
@@ -478,7 +673,12 @@ def bale_request(
     return result
 
 
+# ============================================================
+# SEND TEXT
+# ============================================================
+
 def send_text(item):
+
     title = item["title"]
     summary = item["summary"]
     link = item["link"]
@@ -490,16 +690,23 @@ def send_text(item):
     )
 
     if summary:
-        text += summary + "\n\n"
+        text += (
+            summary
+            + "\n\n"
+        )
 
-    text += f"🔗 {link}"
+    text += (
+        f"🔗 {link}"
+    )
 
     reply_markup = json.dumps(
         {
             "inline_keyboard": [
                 [
                     {
-                        "text": "مشاهده خبر",
+                        "text": (
+                            "مشاهده خبر"
+                        ),
                         "url": link,
                     }
                 ]
@@ -513,12 +720,22 @@ def send_text(item):
         data={
             "chat_id": CHAT_ID,
             "text": text,
-            "reply_markup": reply_markup,
+            "reply_markup": (
+                reply_markup
+            ),
         },
     )
 
 
-def send_photo(item, image_url):
+# ============================================================
+# SEND PHOTO
+# ============================================================
+
+def send_photo(
+    item,
+    image_url,
+):
+
     title = item["title"]
     summary = item["summary"]
     link = item["link"]
@@ -530,9 +747,15 @@ def send_photo(item, image_url):
     )
 
     if summary:
-        caption += summary + "\n\n"
+        caption += (
+            summary
+            + "\n\n"
+        )
 
-    caption += "🔗 مشاهده متن کامل خبر"
+    caption += (
+        "🔗 مشاهده متن کامل خبر"
+    )
+
     caption = caption[:1000]
 
     reply_markup = json.dumps(
@@ -540,7 +763,9 @@ def send_photo(item, image_url):
             "inline_keyboard": [
                 [
                     {
-                        "text": "مشاهده خبر",
+                        "text": (
+                            "مشاهده خبر"
+                        ),
                         "url": link,
                     }
                 ]
@@ -550,6 +775,7 @@ def send_photo(item, image_url):
     )
 
     try:
+
         image_response = requests.get(
             image_url,
             timeout=15,
@@ -581,6 +807,7 @@ def send_photo(item, image_url):
 
         if "png" in content_type:
             extension = ".png"
+
         elif "webp" in content_type:
             extension = ".webp"
 
@@ -597,26 +824,38 @@ def send_photo(item, image_url):
             data={
                 "chat_id": CHAT_ID,
                 "caption": caption,
-                "reply_markup": reply_markup,
+                "reply_markup": (
+                    reply_markup
+                ),
             },
             files=files,
         )
 
     except Exception as exc:
+
         print(
             f"Photo send failed: {exc}"
         )
 
-        return send_text(item)
+        return send_text(
+            item
+        )
 
+
+# ============================================================
+# MAIN
+# ============================================================
 
 def main():
+
     print(
         "==================================="
     )
+
     print(
         "Jahantab Bale News Bot"
     )
+
     print(
         "==================================="
     )
@@ -638,6 +877,7 @@ def main():
     new_count = 0
 
     for item in news[:5]:
+
         link = item["link"]
 
         if link in sent_links:
@@ -648,21 +888,34 @@ def main():
             f"{item['title']}"
         )
 
-        image_url = get_image_from_article(
-            link
+        image_url = (
+            get_image_from_article(
+                link
+            )
         )
 
         try:
+
             if image_url:
+
                 send_photo(
                     item,
                     image_url,
                 )
-            else:
-                send_text(item)
 
-            save_sent_link(link)
-            sent_links.add(link)
+            else:
+
+                send_text(
+                    item
+                )
+
+            save_sent_link(
+                link
+            )
+
+            sent_links.add(
+                link
+            )
 
             new_count += 1
 
@@ -671,8 +924,10 @@ def main():
             )
 
         except Exception as exc:
+
             print(
-                f"Publish failed: {exc}"
+                f"Publish failed: "
+                f"{exc}"
             )
 
     print(
