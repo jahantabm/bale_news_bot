@@ -38,9 +38,6 @@ SOROUSH_LINK = "https://splus.ir/jahantabnews"
 # ============================================================
 # APPROVED INTERNAL SOURCES
 # ============================================================
-#
-# فقط لینک‌هایی که دامنه آنها در این فهرست باشد منتشر می‌شوند.
-# ============================================================
 
 APPROVED_DOMAINS = {
     "irna.ir",
@@ -96,13 +93,17 @@ RSS_FEEDS = [
 
 
 # ============================================================
-# SISTAN & BALUCHESTAN + MAKran
+# SISTAN & BALUCHESTAN / MAKran
 # ============================================================
 
-SISTAN_KEYWORDS = [
+PROVINCE_TERMS = [
     "سیستان و بلوچستان",
+    "سیستان‌وبلوچستان",
     "سیستان",
     "بلوچستان",
+]
+
+CITY_TERMS = [
     "زاهدان",
     "زابل",
     "چابهار",
@@ -128,15 +129,14 @@ SISTAN_KEYWORDS = [
     "نیمروز",
     "بنت",
     "لاشار",
-    "دشتک",
-    "کورین",
     "نوک‌آباد",
-    "بزمان",
     "گشت",
     "پلان",
     "تلنگ",
     "زرآباد",
-    "بخش زرآباد",
+]
+
+MAKRAN_TERMS = [
     "ساحل مکران",
     "سواحل مکران",
     "مکران",
@@ -145,11 +145,48 @@ SISTAN_KEYWORDS = [
 
 
 # ============================================================
-# VERY IMPORTANT NATIONAL NEWS
+# WORDS THAT MAKE A NEWS ITEM CLEARLY NON-LOCAL
 # ============================================================
-#
-# این فهرست عمداً محدود است.
-# خبر عادی سیاسی/اقتصادی/ورزشی وارد بخش ایران نمی‌شود.
+
+NON_LOCAL_SPORTS_TERMS = [
+    "فوتبال",
+    "تیم ملی",
+    "جام جهانی",
+    "لیگ برتر",
+    "لیگ قهرمانان",
+    "پرسپولیس",
+    "استقلال",
+    "سپاهان",
+    "تراکتور",
+    "سردار آزمون",
+    "مهدی طارمی",
+    "رونالدو",
+    "مسی",
+    "بسکتبال",
+    "والیبال",
+    "کشتی",
+    "تنیس",
+    "فرمول یک",
+    "نسکار",
+    "NASCAR",
+]
+
+
+NON_LOCAL_ENTERTAINMENT_TERMS = [
+    "بازیگر",
+    "خواننده",
+    "سلبریتی",
+    "تلویزیون",
+    "سینما",
+    "فیلم",
+    "سریال",
+    "موسیقی",
+    "کنسرت",
+]
+
+
+# ============================================================
+# VERY IMPORTANT NATIONAL NEWS
 # ============================================================
 
 NATIONAL_CRISIS_KEYWORDS = [
@@ -164,7 +201,6 @@ NATIONAL_CRISIS_KEYWORDS = [
 
     "حمله آمریکا به ایران",
     "حمله اسرائیل به ایران",
-    "حمله آمریکا به ایران",
     "حمله اسرائیل به خاک ایران",
     "حمله نظامی به ایران",
 
@@ -172,7 +208,6 @@ NATIONAL_CRISIS_KEYWORDS = [
     "حمله ایران به اسرائیل",
     "حمله ایران به پایگاه آمریکا",
     "حمله ایران به پایگاه‌های آمریکا",
-    "حمله ایران به اسرائیل",
 
     "حمله موشکی به ایران",
     "حمله هوایی به ایران",
@@ -193,7 +228,6 @@ NATIONAL_CRISIS_KEYWORDS = [
     "حمله به تأسیسات هسته‌ای",
     "حمله به تاسیسات هسته‌ای",
 
-    "حمله به نیروگاه",
     "حمله به تأسیسات ایران",
     "حمله به تاسیسات ایران",
 
@@ -208,9 +242,6 @@ NATIONAL_CRISIS_KEYWORDS = [
 
     "مذاکرات ایران و آمریکا",
     "توافق ایران و آمریکا",
-
-    "مذاکرات ایران و اسرائیل",
-    "توافق ایران و اسرائیل",
 
     "اعلام جنگ",
     "آغاز جنگ",
@@ -230,12 +261,10 @@ NATIONAL_CRISIS_KEYWORDS = [
     "حمله به مراکز نظامی ایران",
     "حمله به پایگاه نظامی ایران",
 
-    "وضعیت فوق‌العاده",
     "شرایط جنگی",
 ]
 
 
-# کلمات تأییدکننده برای جلوگیری از اشتباه
 IRAN_CONFIRMATION_KEYWORDS = [
     "ایران",
     "تهران",
@@ -526,19 +555,116 @@ def fetch_feed(source):
 
 
 # ============================================================
-# CLASSIFICATION
+# LOCAL NEWS FILTER
 # ============================================================
 
-def is_sistan_news(title, summary):
-    text = f"{title} {summary}"
+def local_relevance_score(title, summary):
+    title = clean_text(title)
+    summary = clean_text(summary)
 
-    return any(
-        keyword in text
-        for keyword in SISTAN_KEYWORDS
+    title_lower = title.lower()
+    summary_lower = summary.lower()
+
+    # --------------------------------------------------------
+    # Explicitly reject obvious nationwide sports/
+    # entertainment news unless a strong local connection
+    # exists in the title.
+    # --------------------------------------------------------
+
+    has_local_title = any(
+        term in title
+        for term in (
+            PROVINCE_TERMS
+            + CITY_TERMS
+            + MAKRAN_TERMS
+        )
     )
 
+    has_local_summary = any(
+        term in summary
+        for term in (
+            PROVINCE_TERMS
+            + CITY_TERMS
+            + MAKRAN_TERMS
+        )
+    )
+
+    if any(
+        term.lower() in title_lower
+        for term in NON_LOCAL_SPORTS_TERMS
+    ):
+        if not has_local_title:
+            return 0
+
+    if any(
+        term.lower() in title_lower
+        for term in NON_LOCAL_ENTERTAINMENT_TERMS
+    ):
+        if not has_local_title:
+            return 0
+
+    # --------------------------------------------------------
+    # Strong title match = local news
+    # --------------------------------------------------------
+
+    title_score = 0
+
+    for term in PROVINCE_TERMS:
+        if term in title:
+            title_score += 10
+
+    for term in CITY_TERMS:
+        if term in title:
+            title_score += 8
+
+    for term in MAKRAN_TERMS:
+        if term in title:
+            title_score += 8
+
+    # --------------------------------------------------------
+    # If title has no local term, require TWO independent
+    # local indicators in title + summary.
+    # This prevents accidental matches.
+    # --------------------------------------------------------
+
+    if title_score == 0:
+
+        indicators = set()
+
+        for term in PROVINCE_TERMS:
+            if term in summary:
+                indicators.add(term)
+
+        for term in CITY_TERMS:
+            if term in summary:
+                indicators.add(term)
+
+        for term in MAKRAN_TERMS:
+            if term in summary:
+                indicators.add(term)
+
+        if len(indicators) < 2:
+            return 0
+
+        return 5
+
+    # Strong local title match
+    return title_score
+
+
+def is_local_news(title, summary):
+    return local_relevance_score(
+        title,
+        summary,
+    ) > 0
+
+
+# ============================================================
+# NATIONAL VERY IMPORTANT NEWS
+# ============================================================
 
 def national_news_score(title, summary):
+
     text = f"{title} {summary}"
 
     score = 0
@@ -547,38 +673,45 @@ def national_news_score(title, summary):
         if keyword in text:
             score += 10
 
-    confirmation = any(
+    if not any(
         keyword in text
         for keyword in IRAN_CONFIRMATION_KEYWORDS
-    )
-
-    if not confirmation:
+    ):
         return 0
 
     return score
 
 
+# ============================================================
+# CLASSIFY
+# ============================================================
+
 def classify_news(title, summary):
-    if is_sistan_news(
+
+    # Local has priority.
+    if is_local_news(
         title,
         summary,
     ):
         return "استان سیستان و بلوچستان"
 
-    if national_news_score(
+    national_score = national_news_score(
         title,
         summary,
-    ) >= 10:
+    )
+
+    if national_score >= 10:
         return "ایران"
 
     return None
 
 
 # ============================================================
-# COLLECT NEWS
+# COLLECT
 # ============================================================
 
 def collect_news():
+
     now = datetime.now(
         timezone.utc
     )
@@ -592,7 +725,9 @@ def collect_news():
 
     for source in RSS_FEEDS:
 
-        feed = fetch_feed(source)
+        feed = fetch_feed(
+            source
+        )
 
         if not feed:
             continue
@@ -618,20 +753,22 @@ def collect_news():
             if not title or not link:
                 continue
 
-            # ----------------------------------------------
-            # HARD SOURCE FILTER
-            # ----------------------------------------------
-
-            if not is_approved_source(link):
+            # Only approved internal domains.
+            if not is_approved_source(
+                link
+            ):
                 print(
                     "Rejected source:",
                     link,
                 )
                 continue
 
-            published = parse_date(entry)
+            published = parse_date(
+                entry
+            )
 
             if published:
+
                 age = now - published
 
                 if (
@@ -640,7 +777,9 @@ def collect_news():
                 ):
                     continue
 
-            summary = make_summary(entry)
+            summary = make_summary(
+                entry
+            )
 
             category = classify_news(
                 title,
@@ -655,17 +794,13 @@ def collect_news():
 
             seen.add(link)
 
-            score = 0
-
-            if category == "استان سیستان و بلوچستان":
-                score = 100
-
-                for keyword in SISTAN_KEYWORDS:
-                    if keyword in (
-                        f"{title} {summary}"
-                    ):
-                        score += 2
-
+            if category == (
+                "استان سیستان و بلوچستان"
+            ):
+                score = local_relevance_score(
+                    title,
+                    summary,
+                )
             else:
                 score = national_news_score(
                     title,
@@ -690,11 +825,11 @@ def collect_news():
 
 
 # ============================================================
-# SELECT EXACTLY:
-# 3 LOCAL + 1 NATIONAL
+# SELECT 3 LOCAL + 1 NATIONAL
 # ============================================================
 
 def select_news(news):
+
     local_news = [
         item
         for item in news
@@ -725,12 +860,10 @@ def select_news(news):
         reverse=True,
     )
 
-    selected_local = local_news[:3]
-    selected_national = national_news[:1]
-
+    # Maximum 3 local + maximum 1 national.
     selected = (
-        selected_local
-        + selected_national
+        local_news[:3]
+        + national_news[:1]
     )
 
     return selected
@@ -745,6 +878,7 @@ def bale_request(
     data=None,
     files=None,
 ):
+
     url = (
         f"https://tapi.bale.ai/"
         f"bot{BOT_TOKEN}/{method}"
@@ -781,10 +915,13 @@ def bale_request(
 
 
 # ============================================================
-# SOCIAL BUTTONS
+# BUTTONS
 # ============================================================
 
-def make_reply_markup(news_link):
+def make_reply_markup(
+    news_link
+):
+
     return json.dumps(
         {
             "inline_keyboard": [
@@ -841,16 +978,14 @@ def send_text(item):
         f"🌐 جهان‌تاب"
     )
 
-    reply_markup = make_reply_markup(
-        link
-    )
-
     return bale_request(
         "sendMessage",
         data={
             "chat_id": CHAT_ID,
             "text": text,
-            "reply_markup": reply_markup,
+            "reply_markup": make_reply_markup(
+                link
+            ),
         },
     )
 
@@ -885,12 +1020,7 @@ def send_photo(
         f"🌐 جهان‌تاب"
     )
 
-    # Bale caption limit
     caption = caption[:1000]
-
-    reply_markup = make_reply_markup(
-        link
-    )
 
     try:
 
@@ -923,7 +1053,6 @@ def send_photo(
 
         if "png" in content_type:
             extension = ".png"
-
         elif "webp" in content_type:
             extension = ".webp"
 
@@ -940,7 +1069,9 @@ def send_photo(
             data={
                 "chat_id": CHAT_ID,
                 "caption": caption,
-                "reply_markup": reply_markup,
+                "reply_markup": make_reply_markup(
+                    link
+                ),
             },
             files=files,
         )
@@ -1004,10 +1135,12 @@ def main():
         link = item["link"]
 
         if link in sent_links:
+
             print(
                 "Already sent:",
                 item["title"],
             )
+
             continue
 
         print(
@@ -1026,14 +1159,11 @@ def main():
         try:
 
             if image_url:
-
                 send_photo(
                     item,
                     image_url,
                 )
-
             else:
-
                 send_text(
                     item
                 )
