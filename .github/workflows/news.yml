@@ -3,7 +3,7 @@ name: Jahantab Bale News Bot
 on:
   workflow_dispatch:
   schedule:
-- cron: "*/5 * * * *"
+    - cron: "*/5 * * * *"
 
 jobs:
   publish:
