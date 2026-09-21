@@ -131,7 +131,7 @@ BLOCKED_DOMAINS = {
 
 
 # ============================================================
-# SIستان و بلوچستان
+# SIستان و بلوچستان / MAKRAN
 # ============================================================
 
 PROVINCE_TERMS = [
@@ -183,12 +183,96 @@ MAKRAN_TERMS = [
 
 
 # ============================================================
+# TERMS THAT STRONGLY INDICATE A REAL LOCAL NEWS SUBJECT
+# ============================================================
+
+LOCAL_CONTEXT_TERMS = [
+    # مدیریت و امور استان
+    "استاندار",
+    "استانداری",
+    "فرماندار",
+    "فرمانداری",
+    "استانداری سیستان",
+    "نماینده ولی فقیه",
+    "مجمع نمایندگان",
+    "نماینده مردم",
+
+    # حوادث و انتظامی
+    "حادثه",
+    "تصادف",
+    "آتش‌سوزی",
+    "آتش سوزی",
+    "زلزله",
+    "سیل",
+    "طوفان",
+    "بارندگی",
+    "کشف",
+    "قاچاق",
+    "توقیف",
+    "دستگیری",
+    "بازداشت",
+    "فوت",
+    "جان باخت",
+    "کشته",
+    "مصدوم",
+    "نجات",
+    "امداد",
+
+    # پروژه و توسعه
+    "افتتاح",
+    "بهره‌برداری",
+    "بهره برداری",
+    "پروژه",
+    "طرح",
+    "ساخت",
+    "توسعه",
+    "اعتبار",
+    "سرمایه‌گذاری",
+    "سرمایه گذاری",
+    "زیرساخت",
+    "راه",
+    "جاده",
+    "بندر",
+    "بیمارستان",
+    "مدرسه",
+    "دانشگاه",
+    "فرودگاه",
+    "راه‌آهن",
+    "راه آهن",
+
+    # آب، برق، کشاورزی و محیط زیست
+    "آب",
+    "آبرسانی",
+    "برق",
+    "گاز",
+    "کشاورزی",
+    "دامداری",
+    "صیادی",
+    "ماهیگیری",
+    "محیط زیست",
+    "خشکسالی",
+
+    # مکران و چابهار
+    "بندر چابهار",
+    "منطقه آزاد چابهار",
+    "سواحل مکران",
+    "ساحل مکران",
+    "دریای عمان",
+    "بندر",
+    "کشتیرانی",
+    "شیلات",
+]
+
+
+# ============================================================
 # TOPICS THAT ARE NOT LOCAL NEWS
 # ============================================================
 
 LOCAL_EXCLUDE_TERMS = [
+    # ورزش سراسری
     "سردار آزمون",
     "تیم ملی فوتبال",
+    "تیم ملی",
     "فوتبال",
     "لیگ برتر",
     "استقلال",
@@ -196,6 +280,10 @@ LOCAL_EXCLUDE_TERMS = [
     "سپاهان",
     "جام جهانی",
     "بازیکن",
+    "مربی",
+    "ورزش",
+
+    # هنر و سرگرمی
     "خواننده",
     "بازیگر",
     "سلبریتی",
@@ -203,6 +291,20 @@ LOCAL_EXCLUDE_TERMS = [
     "سریال",
     "موسیقی",
     "کنسرت",
+    "سینما",
+    "تلویزیون",
+    "کتاب",
+    "رمان",
+    "آگاتا کریستی",
+    "خانم مارپل",
+    "مارپل",
+    "آلپ",
+
+    # موضوعات عمومی غیرمحلی
+    "فال",
+    "مد",
+    "زیبایی",
+    "سبک زندگی",
 ]
 
 
@@ -468,6 +570,13 @@ def make_summary(entry):
 # LOCAL NEWS FILTER
 # ============================================================
 
+def contains_any(text, terms):
+    return any(
+        term in text
+        for term in terms
+    )
+
+
 def local_score(
     title,
     summary,
@@ -475,46 +584,80 @@ def local_score(
     title = clean_text(title)
     summary = clean_text(summary)
 
-    score = 0
-
-    # Province in title = strongest evidence
-    for term in PROVINCE_TERMS:
-        if term in title:
-            score += 15
-
-    # City in title
-    for term in CITY_TERMS:
-        if term in title:
-            score += 10
-
-    # Makran / Oman Sea in title
-    for term in MAKRAN_TERMS:
-        if term in title:
-            score += 10
-
-    # Supporting evidence in summary
-    for term in PROVINCE_TERMS:
-        if term in summary:
-            score += 3
-
-    for term in CITY_TERMS:
-        if term in summary:
-            score += 3
-
-    for term in MAKRAN_TERMS:
-        if term in summary:
-            score += 3
-
     full_text = (
         title
         + " "
         + summary
     )
 
-    # Explicitly exclude unrelated topics
+    score = 0
+
+    # --------------------------------------------------------
+    # STRONG LOCATION EVIDENCE
+    # --------------------------------------------------------
+
+    for term in PROVINCE_TERMS:
+        if term in title:
+            score += 30
+
+        elif term in summary:
+            score += 10
+
+    # --------------------------------------------------------
+    # CITY IN TITLE IS ONLY SUPPORTING EVIDENCE
+    # It is NOT enough by itself.
+    # --------------------------------------------------------
+
+    city_in_title = False
+
+    for term in CITY_TERMS:
+        if term in title:
+            score += 8
+            city_in_title = True
+
+    # --------------------------------------------------------
+    # MAKRAN / OMAN SEA
+    # --------------------------------------------------------
+
+    for term in MAKRAN_TERMS:
+        if term in title:
+            score += 20
+
+        elif term in summary:
+            score += 8
+
+    # --------------------------------------------------------
+    # REAL LOCAL NEWS CONTEXT
+    # --------------------------------------------------------
+
+    context_count = 0
+
+    for term in LOCAL_CONTEXT_TERMS:
+        if term in full_text:
+            context_count += 1
+
+    # Each meaningful local-news context adds weight.
+    score += min(
+        context_count * 5,
+        25,
+    )
+
+    # --------------------------------------------------------
+    # EXPLICITLY UNRELATED TOPICS
+    # --------------------------------------------------------
+
     for term in LOCAL_EXCLUDE_TERMS:
         if term in full_text:
-            score -= 30
+            score -= 50
+
+    # --------------------------------------------------------
+    # NATIONAL / GENERAL NEWS PENALTY
+    # --------------------------------------------------------
+
+    # If a city appears only incidentally in a general article,
+    # it should not become provincial news.
+    if city_in_title and context_count == 0:
+        score -= 20
 
     return score
 
@@ -524,25 +667,88 @@ def is_real_local_news(
     summary,
 ):
     title = clean_text(title)
+    summary = clean_text(summary)
 
-    title_has_location = any(
-        term in title
-        for term in (
-            PROVINCE_TERMS
-            + CITY_TERMS
-            + MAKRAN_TERMS
-        )
+    full_text = (
+        title
+        + " "
+        + summary
     )
 
-    if not title_has_location:
+    # --------------------------------------------------------
+    # HARD REJECTION:
+    # Explicitly unrelated subjects are never local.
+    # --------------------------------------------------------
+
+    for term in LOCAL_EXCLUDE_TERMS:
+        if term in full_text:
+            return False
+
+    # --------------------------------------------------------
+    # LOCATION MUST EXIST.
+    # --------------------------------------------------------
+
+    has_province = contains_any(
+        full_text,
+        PROVINCE_TERMS,
+    )
+
+    has_city = contains_any(
+        full_text,
+        CITY_TERMS,
+    )
+
+    has_makran = contains_any(
+        full_text,
+        MAKRAN_TERMS,
+    )
+
+    if not (
+        has_province
+        or has_city
+        or has_makran
+    ):
         return False
+
+    # --------------------------------------------------------
+    # STRONGEST CASE:
+    # Province explicitly mentioned.
+    # Still require meaningful local context unless
+    # the title itself is clearly a provincial announcement.
+    # --------------------------------------------------------
 
     score = local_score(
         title,
         summary,
     )
 
-    return score >= 10
+    # Province explicitly in title is strong enough.
+    if contains_any(
+        title,
+        PROVINCE_TERMS,
+    ):
+        return score >= 20
+
+    # Makran explicitly in title is strong enough
+    # when the article also has local context.
+    if contains_any(
+        title,
+        MAKRAN_TERMS,
+    ):
+        return score >= 20
+
+    # A city name alone is NEVER enough.
+    # Require at least one meaningful local-news context.
+    context_count = sum(
+        1
+        for term in LOCAL_CONTEXT_TERMS
+        if term in full_text
+    )
+
+    if has_city and context_count < 1:
+        return False
+
+    return score >= 15
 
 
 # ============================================================
@@ -565,8 +771,6 @@ def national_score(
         if term in text:
             score += 10
 
-    # Normal political/economic/international news
-    # does NOT qualify.
     return score
 
 
@@ -655,15 +859,12 @@ def collect_source(
             if not title or not link:
                 continue
 
-            # The article must be on the
-            # approved source domain.
             if not is_allowed_source_url(
                 link,
                 source_domain,
             ):
                 continue
 
-            # Never accept social/video sites.
             if is_blocked_url(link):
                 continue
 
@@ -727,6 +928,7 @@ def collect_all_news():
     unique = {}
 
     for item in collected:
+
         if item["link"] not in unique:
             unique[
                 item["link"]
@@ -858,9 +1060,7 @@ def select_national_news(
 # IMAGE
 # ============================================================
 
-def get_image_from_article(
-    url
-):
+def get_image_from_article(url):
     try:
 
         response = SESSION.get(
@@ -995,11 +1195,12 @@ def build_message(item):
 
     text += (
         f"🗞 منبع: "
-        f"{item['source']}\n\n"
-        f"🔗 مشاهده لینک خبر\n"
-        f"{item['link']}"
+        f"{item['source']}"
     )
 
+    # IMPORTANT:
+    # The article URL is NOT printed here.
+    # The inline button below already contains the URL.
     text += SOCIAL_LINKS
 
     return text
@@ -1098,7 +1299,6 @@ def send_photo(
             item
         )
 
-        # Caption safety limit
         caption = caption[:1000]
 
         return bale_request(
