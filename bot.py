@@ -27,7 +27,7 @@ if not CHAT_ID:
 
 
 # ============================================================
-# SOCIAL CHANNELS
+# OFFICIAL CHANNELS
 # ============================================================
 
 TELEGRAM_LINK = "https://t.me/Jahantab_news"
@@ -36,7 +36,7 @@ SOROUSH_LINK = "https://splus.ir/jahantabnews"
 
 
 # ============================================================
-# APPROVED INTERNAL SOURCES
+# APPROVED INTERNAL NEWS SOURCES
 # ============================================================
 
 APPROVED_DOMAINS = {
@@ -54,15 +54,13 @@ APPROVED_DOMAINS = {
     "roozplus.com",
     "khabaronline.ir",
     "ilna.ir",
-
-    # صدا و سیمای جمهوری اسلامی ایران
     "iribnews.ir",
     "iribnews.com",
 }
 
 
 # ============================================================
-# RSS SOURCES
+# RSS FEEDS
 # ============================================================
 
 RSS_FEEDS = [
@@ -106,14 +104,16 @@ RSS_FEEDS = [
 
 
 # ============================================================
-# SISTAN & BALUCHESTAN
+# SIستان و بلوچستان
 # ============================================================
 
 PROVINCE_TERMS = [
     "سیستان و بلوچستان",
-    "سیستان‌وبلوچستان",
     "سیستان‌ و بلوچستان",
+    "سیستان‌وبلوچستان",
+    "سیستان بلوچستان",
 ]
+
 
 CITY_TERMS = [
     "زاهدان",
@@ -151,23 +151,19 @@ CITY_TERMS = [
 ]
 
 
-# ============================================================
-# MAKRAN / OMAN SEA
-# ============================================================
-
 MAKRAN_TERMS = [
-    "ساحل مکران",
     "سواحل مکران",
+    "ساحل مکران",
     "مکران",
     "دریای عمان",
 ]
 
 
 # ============================================================
-# CLEARLY NON-LOCAL SUBJECTS
+# WORDS THAT SHOULD NEVER ENTER LOCAL NEWS
 # ============================================================
 
-NON_LOCAL_SPORTS_TERMS = [
+SPORT_TERMS = [
     "فوتبال",
     "تیم ملی",
     "جام جهانی",
@@ -179,40 +175,38 @@ NON_LOCAL_SPORTS_TERMS = [
     "تراکتور",
     "سردار آزمون",
     "مهدی طارمی",
-    "رونالدو",
-    "مسی",
-    "بسکتبال",
     "والیبال",
+    "بسکتبال",
     "کشتی",
     "تنیس",
-    "فرمول یک",
     "نسکار",
     "NASCAR",
 ]
 
 
-NON_LOCAL_ENTERTAINMENT_TERMS = [
+ENTERTAINMENT_TERMS = [
     "بازیگر",
     "خواننده",
     "سلبریتی",
-    "تلویزیون",
     "سینما",
     "فیلم",
     "سریال",
     "موسیقی",
     "کنسرت",
+    "تلویزیون",
 ]
 
 
 # ============================================================
-# VERY IMPORTANT NATIONAL NEWS
+# VERY IMPORTANT NATIONAL EVENTS
 # ============================================================
 
-NATIONAL_CRISIS_KEYWORDS = [
+NATIONAL_KEYWORDS = [
     "جنگ ایران و آمریکا",
     "جنگ ایران و اسرائیل",
     "جنگ ایران آمریکا",
     "جنگ ایران اسرائیل",
+
     "درگیری ایران و آمریکا",
     "درگیری ایران و اسرائیل",
     "درگیری ایران با آمریکا",
@@ -220,39 +214,31 @@ NATIONAL_CRISIS_KEYWORDS = [
 
     "حمله آمریکا به ایران",
     "حمله اسرائیل به ایران",
-    "حمله اسرائیل به خاک ایران",
     "حمله نظامی به ایران",
+    "حمله هوایی به ایران",
+    "حمله موشکی به ایران",
 
-    "حمله ایران به آمریکا",
     "حمله ایران به اسرائیل",
+    "حمله ایران به آمریکا",
     "حمله ایران به پایگاه آمریکا",
     "حمله ایران به پایگاه‌های آمریکا",
 
-    "حمله موشکی به ایران",
-    "حمله هوایی به ایران",
-    "حملات هوایی به ایران",
-    "حملات موشکی به ایران",
-
-    "موشک ایران",
-    "موشک‌های ایران",
-    "موشک به اسرائیل",
-    "موشک به آمریکا",
-
-    "پایگاه آمریکا",
-    "پایگاه‌های آمریکا",
-    "پایگاه آمریکایی",
-
-    "تأسیسات هسته‌ای ایران",
-    "تاسیسات هسته‌ای ایران",
-    "حمله به تأسیسات هسته‌ای",
-    "حمله به تاسیسات هسته‌ای",
-
+    "حمله به تأسیسات هسته‌ای ایران",
+    "حمله به تاسیسات هسته‌ای ایران",
     "حمله به تأسیسات ایران",
     "حمله به تاسیسات ایران",
 
     "بمباران ایران",
     "بمباران اسرائیل",
     "بمباران آمریکا",
+
+    "موشک ایران",
+    "موشک‌های ایران",
+    "موشک به اسرائیل",
+
+    "پایگاه آمریکا",
+    "پایگاه‌های آمریکا",
+    "پایگاه آمریکایی",
 
     "آتش‌بس ایران و اسرائیل",
     "آتش‌بس ایران و آمریکا",
@@ -265,10 +251,6 @@ NATIONAL_CRISIS_KEYWORDS = [
     "اعلام جنگ",
     "آغاز جنگ",
     "پایان جنگ",
-
-    "حمله گسترده به ایران",
-    "حمله گسترده اسرائیل",
-    "حمله گسترده آمریکا",
 
     "عملیات نظامی علیه ایران",
     "عملیات نظامی اسرائیل علیه ایران",
@@ -284,24 +266,26 @@ NATIONAL_CRISIS_KEYWORDS = [
 ]
 
 
-IRAN_CONFIRMATION_KEYWORDS = [
+NATIONAL_CONFIRMATION = [
     "ایران",
+    "ایرانی",
     "تهران",
     "اسرائیل",
+    "اسرائیلی",
     "آمریکا",
     "آمریکایی",
-    "اسرائیلی",
     "سپاه",
+    "ارتش",
     "نیروهای مسلح",
-    "ارتش جمهوری اسلامی",
 ]
 
 
 # ============================================================
-# TEXT CLEANING
+# CLEAN TEXT
 # ============================================================
 
 def clean_text(value):
+
     if not value:
         return ""
 
@@ -327,10 +311,11 @@ def clean_text(value):
 
 
 # ============================================================
-# URL
+# URL HELPERS
 # ============================================================
 
 def normalize_url(url):
+
     if not url:
         return ""
 
@@ -346,14 +331,24 @@ def normalize_url(url):
 
 
 def get_domain(url):
+
     try:
-        domain = urlparse(url).netloc.lower()
-        return domain.removeprefix("www.")
+
+        domain = urlparse(
+            url
+        ).netloc.lower()
+
+        return domain.removeprefix(
+            "www."
+        )
+
     except Exception:
+
         return ""
 
 
-def is_approved_source(url):
+def is_approved_domain(url):
+
     domain = get_domain(url)
 
     if not domain:
@@ -363,7 +358,9 @@ def is_approved_source(url):
         return True
 
     return any(
-        domain.endswith("." + approved)
+        domain.endswith(
+            "." + approved
+        )
         for approved in APPROVED_DOMAINS
     )
 
@@ -373,7 +370,10 @@ def is_approved_source(url):
 # ============================================================
 
 def load_sent_links():
-    if not os.path.exists(STATE_FILE):
+
+    if not os.path.exists(
+        STATE_FILE
+    ):
         return set()
 
     with open(
@@ -381,6 +381,7 @@ def load_sent_links():
         "r",
         encoding="utf-8",
     ) as file:
+
         return {
             line.strip()
             for line in file
@@ -389,12 +390,16 @@ def load_sent_links():
 
 
 def save_sent_link(link):
+
     with open(
         STATE_FILE,
         "a",
         encoding="utf-8",
     ) as file:
-        file.write(link + "\n")
+
+        file.write(
+            link + "\n"
+        )
 
 
 # ============================================================
@@ -402,12 +407,15 @@ def save_sent_link(link):
 # ============================================================
 
 def parse_date(entry):
+
     try:
+
         if getattr(
             entry,
             "published_parsed",
             None,
         ):
+
             import calendar
 
             timestamp = calendar.timegm(
@@ -424,6 +432,7 @@ def parse_date(entry):
             "updated_parsed",
             None,
         ):
+
             import calendar
 
             timestamp = calendar.timegm(
@@ -446,6 +455,7 @@ def parse_date(entry):
 # ============================================================
 
 def make_summary(entry):
+
     description = ""
 
     if getattr(
@@ -453,6 +463,7 @@ def make_summary(entry):
         "summary",
         None,
     ):
+
         description = clean_text(
             entry.summary
         )
@@ -462,6 +473,7 @@ def make_summary(entry):
         "description",
         None,
     ):
+
         description = clean_text(
             entry.description
         )
@@ -476,6 +488,7 @@ def make_summary(entry):
     )
 
     if len(description) > 500:
+
         description = (
             description[:497]
             .rsplit(" ", 1)[0]
@@ -490,10 +503,12 @@ def make_summary(entry):
 # ============================================================
 
 def get_image_from_article(url):
+
     if not url:
         return None
 
     try:
+
         response = requests.get(
             url,
             timeout=10,
@@ -515,8 +530,13 @@ def get_image_from_article(url):
             property="og:image",
         )
 
-        if image and image.get("content"):
-            return image["content"].strip()
+        if image and image.get(
+            "content"
+        ):
+
+            return image[
+                "content"
+            ].strip()
 
         image = soup.find(
             "meta",
@@ -525,10 +545,16 @@ def get_image_from_article(url):
             },
         )
 
-        if image and image.get("content"):
-            return image["content"].strip()
+        if image and image.get(
+            "content"
+        ):
+
+            return image[
+                "content"
+            ].strip()
 
     except Exception as exc:
+
         print(
             f"Image lookup failed: {exc}"
         )
@@ -577,99 +603,164 @@ def fetch_feed(source):
 
 
 # ============================================================
-# LOCAL NEWS FILTER
+# STRICT LOCAL FILTER
 # ============================================================
 
-def local_relevance_score(
+def local_score(
     title,
     summary,
 ):
 
-    title = clean_text(title)
-    summary = clean_text(summary)
-
-    title_lower = title.lower()
-
-    # --------------------------------------------------------
-    # Local terms
-    # --------------------------------------------------------
-
-    local_title_terms = (
-        PROVINCE_TERMS
-        + CITY_TERMS
-        + MAKRAN_TERMS
+    title = clean_text(
+        title
     )
 
-    local_summary_terms = (
-        PROVINCE_TERMS
-        + CITY_TERMS
-        + MAKRAN_TERMS
-    )
-
-    has_local_title = any(
-        term in title
-        for term in local_title_terms
+    summary = clean_text(
+        summary
     )
 
     # --------------------------------------------------------
-    # Reject obvious unrelated sports news.
+    # IMPORTANT:
+    # The LOCALITY must be in the TITLE.
+    # Mentioning Zahedan/Chabahar only in the body
+    # is NOT enough.
     # --------------------------------------------------------
 
-    if any(
-        term.lower() in title_lower
-        for term in NON_LOCAL_SPORTS_TERMS
-    ):
-        if not has_local_title:
-            return 0
-
-    # --------------------------------------------------------
-    # Reject obvious entertainment news.
-    # --------------------------------------------------------
-
-    if any(
-        term.lower() in title_lower
-        for term in NON_LOCAL_ENTERTAINMENT_TERMS
-    ):
-        if not has_local_title:
-            return 0
-
-    # --------------------------------------------------------
-    # Strong local title
-    # --------------------------------------------------------
-
+    title_local = False
     score = 0
 
     for term in PROVINCE_TERMS:
+
         if term in title:
-            score += 20
+
+            title_local = True
+            score += 50
 
     for term in CITY_TERMS:
+
         if term in title:
-            score += 15
+
+            title_local = True
+            score += 30
+
+    # --------------------------------------------------------
+    # Makran / Oman Sea
+    # --------------------------------------------------------
 
     for term in MAKRAN_TERMS:
+
         if term in title:
-            score += 15
 
-    if score > 0:
-        return score
+            title_local = True
+            score += 35
 
     # --------------------------------------------------------
-    # If title does NOT contain a local place,
-    # require at least TWO different local indicators
-    # in the summary.
+    # If no local location exists in TITLE,
+    # reject immediately.
     # --------------------------------------------------------
 
-    indicators = set()
+    if not title_local:
+        return 0
 
-    for term in local_summary_terms:
-        if term in summary:
-            indicators.add(term)
+    # --------------------------------------------------------
+    # Reject sports
+    # --------------------------------------------------------
 
-    if len(indicators) >= 2:
-        return 5
+    for term in SPORT_TERMS:
 
-    return 0
+        if term in title:
+
+            return 0
+
+    # --------------------------------------------------------
+    # Reject entertainment
+    # --------------------------------------------------------
+
+    for term in ENTERTAINMENT_TERMS:
+
+        if term in title:
+
+            return 0
+
+    # --------------------------------------------------------
+    # Extra protection against generic national stories
+    # --------------------------------------------------------
+
+    generic_national_terms = [
+        "رئیس جمهور",
+        "هیئت دولت",
+        "دولت",
+        "مجلس",
+        "نمایندگان",
+        "وزیر",
+        "وزارتخانه",
+        "بانک مرکزی",
+        "بورس",
+        "ارز",
+        "دلار",
+        "خودرو",
+        "قیمت",
+        "انتخابات",
+    ]
+
+    # If the title is clearly national and
+    # local place is only incidental, reject.
+    #
+    # We only apply this when the title contains
+    # no strong local action/subject.
+
+    strong_local_subjects = [
+        "استاندار",
+        "استان",
+        "فرماندار",
+        "شهردار",
+        "شهرستان",
+        "بندر",
+        "بندرگاه",
+        "منطقه آزاد",
+        "دانشگاه",
+        "مدرسه",
+        "بیمارستان",
+        "نیروی انتظامی",
+        "پلیس",
+        "هلال احمر",
+        "زلزله",
+        "سیل",
+        "طوفان",
+        "گردوغبار",
+        "بارندگی",
+        "تصادف",
+        "آتش‌سوزی",
+        "حادثه",
+        "صیاد",
+        "ماهیگیری",
+        "صادرات",
+        "واردات",
+        "مرز",
+        "مرزبان",
+        "سوخت",
+        "سوختبر",
+        "بندر",
+        "ساحل",
+        "دریا",
+        "مکران",
+    ]
+
+    has_strong_local_subject = any(
+        term in title
+        for term in strong_local_subjects
+    )
+
+    if (
+        any(
+            term in title
+            for term in generic_national_terms
+        )
+        and not has_strong_local_subject
+    ):
+        return 0
+
+    return score
 
 
 def is_local_news(
@@ -678,7 +769,7 @@ def is_local_news(
 ):
 
     return (
-        local_relevance_score(
+        local_score(
             title,
             summary,
         )
@@ -687,33 +778,97 @@ def is_local_news(
 
 
 # ============================================================
-# NATIONAL VERY IMPORTANT NEWS
+# NATIONAL VERY IMPORTANT FILTER
 # ============================================================
 
-def national_news_score(
+def national_score(
     title,
     summary,
 ):
 
-    text = f"{title} {summary}"
+    title = clean_text(
+        title
+    )
+
+    summary = clean_text(
+        summary
+    )
+
+    # National breaking stories should
+    # primarily be identified from TITLE.
 
     score = 0
 
-    for keyword in NATIONAL_CRISIS_KEYWORDS:
-        if keyword in text:
-            score += 10
+    for keyword in NATIONAL_KEYWORDS:
+
+        if keyword in title:
+
+            score += 100
+
+    # Allow a few extremely important headlines
+    # where the title contains Iran + a major action.
+
+    major_actions = [
+        "حمله",
+        "جنگ",
+        "بمباران",
+        "موشک",
+        "مذاکرات",
+        "آتش‌بس",
+        "آتش بس",
+        "ترور",
+        "عملیات نظامی",
+    ]
+
+    has_iran = any(
+        word in title
+        for word in [
+            "ایران",
+            "ایرانی",
+        ]
+    )
+
+    has_major_action = any(
+        word in title
+        for word in major_actions
+    )
+
+    if (
+        has_iran
+        and has_major_action
+    ):
+
+        score += 50
+
+    # Never accept national news
+    # without an Iran-related confirmation.
 
     if not any(
-        keyword in text
-        for keyword in IRAN_CONFIRMATION_KEYWORDS
+        word in title
+        for word in NATIONAL_CONFIRMATION
     ):
+
         return 0
 
     return score
 
 
+def is_very_important_national(
+    title,
+    summary,
+):
+
+    return (
+        national_score(
+            title,
+            summary,
+        )
+        >= 100
+    )
+
+
 # ============================================================
-# CLASSIFICATION
+# CLASSIFY
 # ============================================================
 
 def classify_news(
@@ -721,27 +876,29 @@ def classify_news(
     summary,
 ):
 
-    # Local news gets priority.
+    # LOCAL HAS PRIORITY
     if is_local_news(
         title,
         summary,
     ):
-        return "استان سیستان و بلوچستان"
 
-    # Only very important national events.
-    national_score = national_news_score(
+        return (
+            "استان سیستان و بلوچستان"
+        )
+
+    # ONLY VERY IMPORTANT NATIONAL
+    if is_very_important_national(
         title,
         summary,
-    )
+    ):
 
-    if national_score >= 10:
         return "ایران"
 
     return None
 
 
 # ============================================================
-# COLLECT NEWS
+# COLLECT
 # ============================================================
 
 def collect_news():
@@ -788,16 +945,18 @@ def collect_news():
                 continue
 
             # ------------------------------------------------
-            # ONLY APPROVED INTERNAL SOURCES
+            # ONLY INTERNAL SOURCES
             # ------------------------------------------------
 
-            if not is_approved_source(
+            if not is_approved_domain(
                 link
             ):
+
                 print(
                     "Rejected source:",
                     link,
                 )
+
                 continue
 
             published = parse_date(
@@ -806,12 +965,15 @@ def collect_news():
 
             if published:
 
-                age = now - published
+                age = (
+                    now - published
+                )
 
                 if (
                     age < timedelta(0)
                     or age > max_age
                 ):
+
                     continue
 
             summary = make_summary(
@@ -834,12 +996,15 @@ def collect_news():
             if category == (
                 "استان سیستان و بلوچستان"
             ):
-                score = local_relevance_score(
+
+                score = local_score(
                     title,
                     summary,
                 )
+
             else:
-                score = national_news_score(
+
+                score = national_score(
                     title,
                     summary,
                 )
@@ -850,10 +1015,13 @@ def collect_news():
                     "summary": summary,
                     "link": link,
                     "published": (
-                        published or now
+                        published
+                        or now
                     ),
                     "category": category,
-                    "source": source["name"],
+                    "source": source[
+                        "name"
+                    ],
                     "score": score,
                 }
             )
@@ -862,7 +1030,7 @@ def collect_news():
 
 
 # ============================================================
-# SELECT:
+# SELECT EXACTLY:
 # 3 LOCAL + 1 NATIONAL
 # ============================================================
 
@@ -882,6 +1050,7 @@ def select_news(news):
         == "ایران"
     ]
 
+    # Highest relevance first.
     local_news.sort(
         key=lambda item: (
             item["score"],
@@ -898,10 +1067,15 @@ def select_news(news):
         reverse=True,
     )
 
-    selected = (
-        local_news[:3]
-        + national_news[:1]
-    )
+    selected = []
+
+    # Maximum 3 local stories.
+    for item in local_news[:3]:
+        selected.append(item)
+
+    # Maximum 1 national story.
+    for item in national_news[:1]:
+        selected.append(item)
 
     return selected
 
@@ -929,6 +1103,7 @@ def bale_request(
     )
 
     try:
+
         result = response.json()
 
     except Exception:
@@ -998,24 +1173,19 @@ def make_reply_markup(
 
 def send_text(item):
 
-    title = item["title"]
-    summary = item["summary"]
-    link = item["link"]
-    category = item["category"]
-    source = item["source"]
-
     text = (
-        f"🚨 {category}\n\n"
-        f"📰 {title}\n\n"
+        f"🚨 {item['category']}\n\n"
+        f"📰 {item['title']}\n\n"
     )
 
-    if summary:
+    if item["summary"]:
+
         text += (
-            f"{summary}\n\n"
+            f"{item['summary']}\n\n"
         )
 
     text += (
-        f"🗞 منبع: {source}\n\n"
+        f"🗞 منبع: {item['source']}\n\n"
         f"🌐 جهان‌تاب"
     )
 
@@ -1024,9 +1194,10 @@ def send_text(item):
         data={
             "chat_id": CHAT_ID,
             "text": text,
-            "reply_markup": make_reply_markup(
-                link
-            ),
+            "reply_markup":
+                make_reply_markup(
+                    item["link"]
+                ),
         },
     )
 
@@ -1040,24 +1211,19 @@ def send_photo(
     image_url,
 ):
 
-    title = item["title"]
-    summary = item["summary"]
-    link = item["link"]
-    category = item["category"]
-    source = item["source"]
-
     caption = (
-        f"🚨 {category}\n\n"
-        f"📰 {title}\n\n"
+        f"🚨 {item['category']}\n\n"
+        f"📰 {item['title']}\n\n"
     )
 
-    if summary:
+    if item["summary"]:
+
         caption += (
-            f"{summary}\n\n"
+            f"{item['summary']}\n\n"
         )
 
     caption += (
-        f"🗞 منبع: {source}\n\n"
+        f"🗞 منبع: {item['source']}\n\n"
         f"🌐 جهان‌تاب"
     )
 
@@ -1112,9 +1278,10 @@ def send_photo(
             data={
                 "chat_id": CHAT_ID,
                 "caption": caption,
-                "reply_markup": make_reply_markup(
-                    link
-                ),
+                "reply_markup":
+                    make_reply_markup(
+                        item["link"]
+                    ),
             },
             files=files,
         )
@@ -1125,7 +1292,6 @@ def send_photo(
             f"Photo send failed: {exc}"
         )
 
-        # If image fails, send text instead.
         return send_text(item)
 
 
@@ -1141,6 +1307,10 @@ def main():
 
     print(
         "Jahantab Bale News Bot"
+    )
+
+    print(
+        "STRICT LOCAL / NATIONAL MODE"
     )
 
     print(
@@ -1166,12 +1336,34 @@ def main():
     )
 
     print(
-        f"Selected news: "
+        f"Selected for publication: "
         f"{len(selected)}"
     )
 
-    local_count = 0
-    national_count = 0
+    local_selected = sum(
+        1
+        for item in selected
+        if item["category"]
+        == "استان سیستان و بلوچستان"
+    )
+
+    national_selected = sum(
+        1
+        for item in selected
+        if item["category"]
+        == "ایران"
+    )
+
+    print(
+        f"Selected local: "
+        f"{local_selected}"
+    )
+
+    print(
+        f"Selected national: "
+        f"{national_selected}"
+    )
+
     new_count = 0
 
     for item in selected:
@@ -1188,10 +1380,10 @@ def main():
             continue
 
         print(
-            f"Publishing: "
-            f"[{item['category']}] "
-            f"[{item['source']}] "
-            f"{item['title']}"
+            "Publishing:",
+            f"[{item['category']}]",
+            f"[{item['source']}]",
+            item["title"],
         )
 
         image_url = (
@@ -1225,14 +1417,6 @@ def main():
 
             new_count += 1
 
-            if item["category"] == (
-                "استان سیستان و بلوچستان"
-            ):
-                local_count += 1
-
-            else:
-                national_count += 1
-
             print(
                 "Published successfully."
             )
@@ -1246,16 +1430,6 @@ def main():
 
     print(
         "-----------------------------------"
-    )
-
-    print(
-        f"Local published: "
-        f"{local_count}"
-    )
-
-    print(
-        f"National published: "
-        f"{national_count}"
     )
 
     print(
