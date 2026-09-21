@@ -3,7 +3,7 @@ import re
 import json
 import html
 from datetime import datetime, timezone, timedelta
-from urllib.parse import quote
+from urllib.parse import urlparse
 
 import requests
 import feedparser
@@ -27,38 +27,52 @@ if not CHAT_ID:
 
 
 # ============================================================
-# RSS FEEDS
+# APPROVED INTERNAL SOURCES
 # ============================================================
 
-SISTAN_FEEDS = [
-    "https://news.google.com/rss/search?q="
-    + quote('"سیستان و بلوچستان"')
-    + "&hl=fa&gl=IR&ceid=IR:fa",
+APPROVED_DOMAINS = {
+    "tabnak.ir",
+    "asriran.com",
+    "isna.ir",
+    "mehrnews.com",
+    "tasnimnews.com",
+    "khabaronline.ir",
+}
 
-    "https://news.google.com/rss/search?q="
-    + quote(
-        '"زاهدان" OR "زابل" OR "چابهار" OR "سراوان" '
-        'OR "ایرانشهر" OR "خاش"'
-    )
-    + "&hl=fa&gl=IR&ceid=IR:fa",
+
+RSS_FEEDS = [
+    {
+        "name": "تابناک",
+        "url": "https://www.tabnak.ir/fa/rss/allnews",
+    },
+    {
+        "name": "عصر ایران",
+        "url": "https://www.asriran.com/fa/rss/allnews",
+    },
+    {
+        "name": "ایسنا",
+        "url": "https://www.isna.ir/rss",
+    },
+    {
+        "name": "مهر",
+        "url": "https://www.mehrnews.com/rss",
+    },
+    {
+        "name": "تسنیم",
+        "url": (
+            "https://www.tasnimnews.com/fa/rss/feed/"
+            "0/8/0/%D9%85%D9%87%D9%85%D8%AA%D8%B1%DB%8C%D9%86-%D8%A7%D8%AE%D8%A8%D8%A7%D8%B1-%D8%AA%D8%B3%D9%86%DB%8C%D9%85"
+        ),
+    },
+    {
+        "name": "خبرآنلاین",
+        "url": "https://www.khabaronline.ir/rss",
+    },
 ]
 
 
-IRAN_FEEDS = [
-    "https://news.google.com/rss/search?q="
-    + quote(
-        'ایران (فوری OR مهم OR "خبر فوری" OR "آخرین خبر")'
-    )
-    + "&hl=fa&gl=IR&ceid=IR:fa",
-
-    "https://news.google.com/rss/search?q="
-    + quote('"خبر فوری ایران" OR "فوری ایران"')
-    + "&hl=fa&gl=IR&ceid=IR:fa",
-]
-
-
 # ============================================================
-# KEYWORDS
+# SIستان و بلوچستان
 # ============================================================
 
 SISTAN_KEYWORDS = [
@@ -92,12 +106,15 @@ SISTAN_KEYWORDS = [
 ]
 
 
+# ============================================================
+# IMPORTANT / URGENT IRAN
+# ============================================================
+
 URGENT_KEYWORDS = [
     "فوری",
     "خبر فوری",
     "لحظه‌ای",
     "لحظاتی پیش",
-    "آخرین خبر",
     "هشدار",
     "زلزله",
     "سیل",
@@ -105,28 +122,6 @@ URGENT_KEYWORDS = [
     "انفجار",
     "آتش‌سوزی",
     "حادثه",
-    "تصادف",
-    "کشته",
-    "مجروح",
-    "بازداشت",
-    "حمله",
-    "درگیری",
-    "تعطیلی",
-    "قطع",
-    "فوت",
-    "فوتی",
-    "ترور",
-]
-
-
-IMPORTANT_IRAN_KEYWORDS = [
-    "فوری",
-    "خبر فوری",
-    "هشدار",
-    "زلزله",
-    "سیل",
-    "انفجار",
-    "آتش‌سوزی",
     "حمله",
     "درگیری",
     "تعطیلی سراسری",
@@ -141,7 +136,7 @@ IMPORTANT_IRAN_KEYWORDS = [
 
 
 # ============================================================
-# TEXT HELPERS
+# TEXT
 # ============================================================
 
 def clean_text(value):
@@ -182,6 +177,26 @@ def normalize_url(url):
     )
 
     return url.rstrip("?&")
+
+
+def get_domain(url):
+    try:
+        domain = urlparse(url).netloc.lower()
+        return domain.removeprefix("www.")
+    except Exception:
+        return ""
+
+
+def is_approved_source(url):
+    domain = get_domain(url)
+
+    if domain in APPROVED_DOMAINS:
+        return True
+
+    return any(
+        domain.endswith("." + approved)
+        for approved in APPROVED_DOMAINS
+    )
 
 
 # ============================================================
@@ -254,7 +269,45 @@ def parse_date(entry):
     except Exception:
         pass
 
-    return datetime.now(timezone.utc)
+    return None
+
+
+# ============================================================
+# SUMMARY
+# ============================================================
+
+def make_summary(entry):
+    description = ""
+
+    if getattr(
+        entry,
+        "summary",
+        None,
+    ):
+        description = clean_text(
+            entry.summary
+        )
+
+    if not description and getattr(
+        entry,
+        "description",
+        None,
+    ):
+        description = clean_text(
+            entry.description
+        )
+
+    if not description:
+        return ""
+
+    if len(description) > 450:
+        description = (
+            description[:447]
+            .rsplit(" ", 1)[0]
+            + "..."
+        )
+
+    return description
 
 
 # ============================================================
@@ -270,10 +323,8 @@ def get_image_from_article(url):
             url,
             timeout=10,
             headers={
-                "User-Agent": (
-                    "Mozilla/5.0 "
-                    "JahantabNewsBot/1.0"
-                )
+                "User-Agent":
+                    "Mozilla/5.0 JahantabNewsBot/1.0"
             },
         )
 
@@ -311,101 +362,17 @@ def get_image_from_article(url):
 
 
 # ============================================================
-# SUMMARY
-# ============================================================
-
-def make_summary(entry):
-    description = ""
-
-    if getattr(
-        entry,
-        "summary",
-        None,
-    ):
-        description = clean_text(
-            entry.summary
-        )
-
-    if not description and getattr(
-        entry,
-        "description",
-        None,
-    ):
-        description = clean_text(
-            entry.description
-        )
-
-    if not description:
-        return ""
-
-    description = re.sub(
-        r"\s*\.\.\.\s*$",
-        "",
-        description,
-    )
-
-    if len(description) > 450:
-        description = (
-            description[:447]
-            .rsplit(" ", 1)[0]
-            + "..."
-        )
-
-    return description
-
-
-# ============================================================
-# SCORING
-# ============================================================
-
-def score_sistan(
-    title,
-    summary,
-):
-    text = f"{title} {summary}"
-
-    score = 0
-
-    for keyword in SISTAN_KEYWORDS:
-        if keyword in text:
-            score += 2
-
-    for keyword in URGENT_KEYWORDS:
-        if keyword in text:
-            score += 2
-
-    return score
-
-
-def score_iran(
-    title,
-    summary,
-):
-    text = f"{title} {summary}"
-
-    score = 0
-
-    for keyword in IMPORTANT_IRAN_KEYWORDS:
-        if keyword in text:
-            score += 2
-
-    return score
-
-
-# ============================================================
 # RSS
 # ============================================================
 
-def fetch_feed(url):
+def fetch_feed(source):
     try:
         response = requests.get(
-            url,
+            source["url"],
             timeout=20,
             headers={
-                "User-Agent": (
-                    "Mozilla/5.0 "
-                    "JahantabNewsBot/1.0"
-                )
+                "User-Agent":
+                    "Mozilla/5.0 JahantabNewsBot/1.0"
             },
         )
 
@@ -416,49 +383,61 @@ def fetch_feed(url):
         )
 
         print(
-            f"RSS URL: {url}"
+            f"{source['name']}: "
+            f"{len(feed.entries)} entries"
         )
-
-        print(
-            f"RSS entries: "
-            f"{len(feed.entries)}"
-        )
-
-        if getattr(
-            feed,
-            "bozo",
-            False,
-        ):
-            print(
-                "RSS parse warning:",
-                feed.bozo_exception,
-            )
-
-        if feed.entries:
-            for entry in feed.entries[:3]:
-                print(
-                    "RSS title:",
-                    clean_text(
-                        getattr(
-                            entry,
-                            "title",
-                            "",
-                        )
-                    ),
-                )
 
         return feed
 
     except Exception as exc:
         print(
-            f"Feed error: {exc}"
+            f"{source['name']} feed error: "
+            f"{exc}"
         )
 
         return None
 
 
 # ============================================================
-# COLLECT NEWS
+# CLASSIFICATION
+# ============================================================
+
+def is_sistan_news(title, summary):
+    text = f"{title} {summary}"
+
+    return any(
+        keyword in text
+        for keyword in SISTAN_KEYWORDS
+    )
+
+
+def is_important_iran_news(title, summary):
+    text = f"{title} {summary}"
+
+    return any(
+        keyword in text
+        for keyword in URGENT_KEYWORDS
+    )
+
+
+def classify_news(title, summary):
+    if is_sistan_news(
+        title,
+        summary,
+    ):
+        return "سیستان و بلوچستان"
+
+    if is_important_iran_news(
+        title,
+        summary,
+    ):
+        return "ایران"
+
+    return None
+
+
+# ============================================================
+# COLLECT
 # ============================================================
 
 def collect_news():
@@ -467,20 +446,15 @@ def collect_news():
     )
 
     max_age = timedelta(
-        hours=18
+        hours=24
     )
 
     collected = []
+    seen = set()
 
-    # --------------------------------------------------------
-    # Sistan & Baluchestan
-    # --------------------------------------------------------
+    for source in RSS_FEEDS:
 
-    for feed_url in SISTAN_FEEDS:
-
-        feed = fetch_feed(
-            feed_url
-        )
+        feed = fetch_feed(source)
 
         if not feed:
             continue
@@ -506,126 +480,63 @@ def collect_news():
             if not title or not link:
                 continue
 
-            published = parse_date(
-                entry
-            )
+            # ----------------------------------------------
+            # HARD SOURCE FILTER
+            # ----------------------------------------------
 
-            if (
-                now - published
-                > max_age
-            ):
+            if not is_approved_source(link):
+                print(
+                    "Rejected source:",
+                    link,
+                )
                 continue
 
-            summary = make_summary(
-                entry
-            )
+            published = parse_date(entry)
 
-            score = score_sistan(
+            if published:
+                age = now - published
+
+                if (
+                    age < timedelta(0)
+                    or age > max_age
+                ):
+                    continue
+
+            summary = make_summary(entry)
+
+            category = classify_news(
                 title,
                 summary,
             )
 
-            if score < 2:
+            if not category:
                 continue
+
+            if link in seen:
+                continue
+
+            seen.add(link)
 
             collected.append(
                 {
                     "title": title,
                     "summary": summary,
                     "link": link,
-                    "published": published,
-                    "category": (
-                        "سیستان و بلوچستان"
+                    "published": (
+                        published or now
                     ),
-                    "score": score,
-                }
-            )
-
-    # --------------------------------------------------------
-    # Important Iran
-    # --------------------------------------------------------
-
-    for feed_url in IRAN_FEEDS:
-
-        feed = fetch_feed(
-            feed_url
-        )
-
-        if not feed:
-            continue
-
-        for entry in feed.entries:
-
-            title = clean_text(
-                getattr(
-                    entry,
-                    "title",
-                    "",
-                )
-            )
-
-            link = normalize_url(
-                getattr(
-                    entry,
-                    "link",
-                    "",
-                )
-            )
-
-            if not title or not link:
-                continue
-
-            published = parse_date(
-                entry
-            )
-
-            if (
-                now - published
-                > max_age
-            ):
-                continue
-
-            summary = make_summary(
-                entry
-            )
-
-            score = score_iran(
-                title,
-                summary,
-            )
-
-            if score < 2:
-                continue
-
-            collected.append(
-                {
-                    "title": title,
-                    "summary": summary,
-                    "link": link,
-                    "published": published,
-                    "category": "ایران",
-                    "score": score,
+                    "category": category,
+                    "source": source["name"],
                 }
             )
 
     collected.sort(
-        key=lambda item: (
-            item["score"],
+        key=lambda item:
             item["published"],
-        ),
         reverse=True,
     )
 
-    unique = {}
-
-    for item in collected:
-
-        if item["link"] not in unique:
-            unique[item["link"]] = item
-
-    return list(
-        unique.values()
-    )
+    return collected
 
 
 # ============================================================
@@ -637,7 +548,6 @@ def bale_request(
     data=None,
     files=None,
 ):
-
     url = (
         f"https://tapi.bale.ai/"
         f"bot{BOT_TOKEN}/{method}"
@@ -652,7 +562,6 @@ def bale_request(
 
     try:
         result = response.json()
-
     except Exception:
         result = {
             "ok": False,
@@ -661,10 +570,7 @@ def bale_request(
 
     if (
         not response.ok
-        or not result.get(
-            "ok",
-            False,
-        )
+        or not result.get("ok", False)
     ):
         raise RuntimeError(
             f"Bale API error: {result}"
@@ -678,11 +584,11 @@ def bale_request(
 # ============================================================
 
 def send_text(item):
-
     title = item["title"]
     summary = item["summary"]
     link = item["link"]
     category = item["category"]
+    source = item["source"]
 
     text = (
         f"🚨 {category}\n\n"
@@ -696,7 +602,8 @@ def send_text(item):
         )
 
     text += (
-        f"🔗 {link}"
+        f"🗞 منبع: {source}\n\n"
+        f"🔗 مشاهده خبر"
     )
 
     reply_markup = json.dumps(
@@ -704,9 +611,7 @@ def send_text(item):
             "inline_keyboard": [
                 [
                     {
-                        "text": (
-                            "مشاهده خبر"
-                        ),
+                        "text": "مشاهده خبر",
                         "url": link,
                     }
                 ]
@@ -720,9 +625,7 @@ def send_text(item):
         data={
             "chat_id": CHAT_ID,
             "text": text,
-            "reply_markup": (
-                reply_markup
-            ),
+            "reply_markup": reply_markup,
         },
     )
 
@@ -735,11 +638,11 @@ def send_photo(
     item,
     image_url,
 ):
-
     title = item["title"]
     summary = item["summary"]
     link = item["link"]
     category = item["category"]
+    source = item["source"]
 
     caption = (
         f"🚨 {category}\n\n"
@@ -753,7 +656,8 @@ def send_photo(
         )
 
     caption += (
-        "🔗 مشاهده متن کامل خبر"
+        f"🗞 منبع: {source}\n\n"
+        f"🔗 مشاهده متن کامل خبر"
     )
 
     caption = caption[:1000]
@@ -763,9 +667,7 @@ def send_photo(
             "inline_keyboard": [
                 [
                     {
-                        "text": (
-                            "مشاهده خبر"
-                        ),
+                        "text": "مشاهده خبر",
                         "url": link,
                     }
                 ]
@@ -775,15 +677,12 @@ def send_photo(
     )
 
     try:
-
         image_response = requests.get(
             image_url,
             timeout=15,
             headers={
-                "User-Agent": (
-                    "Mozilla/5.0 "
-                    "JahantabNewsBot/1.0"
-                )
+                "User-Agent":
+                    "Mozilla/5.0 JahantabNewsBot/1.0"
             },
         )
 
@@ -807,7 +706,6 @@ def send_photo(
 
         if "png" in content_type:
             extension = ".png"
-
         elif "webp" in content_type:
             extension = ".webp"
 
@@ -824,22 +722,17 @@ def send_photo(
             data={
                 "chat_id": CHAT_ID,
                 "caption": caption,
-                "reply_markup": (
-                    reply_markup
-                ),
+                "reply_markup": reply_markup,
             },
             files=files,
         )
 
     except Exception as exc:
-
         print(
             f"Photo send failed: {exc}"
         )
 
-        return send_text(
-            item
-        )
+        return send_text(item)
 
 
 # ============================================================
@@ -847,15 +740,12 @@ def send_photo(
 # ============================================================
 
 def main():
-
     print(
         "==================================="
     )
-
     print(
         "Jahantab Bale News Bot"
     )
-
     print(
         "==================================="
     )
@@ -870,7 +760,7 @@ def main():
     news = collect_news()
 
     print(
-        f"Relevant news found: "
+        f"Relevant approved news found: "
         f"{len(news)}"
     )
 
@@ -885,37 +775,25 @@ def main():
 
         print(
             f"Publishing: "
+            f"[{item['source']}] "
             f"{item['title']}"
         )
 
         image_url = (
-            get_image_from_article(
-                link
-            )
+            get_image_from_article(link)
         )
 
         try:
-
             if image_url:
-
                 send_photo(
                     item,
                     image_url,
                 )
-
             else:
+                send_text(item)
 
-                send_text(
-                    item
-                )
-
-            save_sent_link(
-                link
-            )
-
-            sent_links.add(
-                link
-            )
+            save_sent_link(link)
+            sent_links.add(link)
 
             new_count += 1
 
@@ -924,7 +802,6 @@ def main():
             )
 
         except Exception as exc:
-
             print(
                 f"Publish failed: "
                 f"{exc}"
