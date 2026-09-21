@@ -60,51 +60,86 @@ APPROVED_DOMAINS = {
 
 
 # ============================================================
-# RSS منابع
+# RSS منابع داخلی
 # ============================================================
 
 RSS_FEEDS = [
+
     {
         "name": "ایرنا",
         "url": "https://www.irna.ir/rss",
     },
+
     {
         "name": "ایسنا",
         "url": "https://www.isna.ir/rss",
     },
+
     {
         "name": "مهر",
         "url": "https://www.mehrnews.com/rss",
     },
+
     {
         "name": "فارس",
         "url": "https://www.farsnews.ir/rss",
     },
+
     {
         "name": "ایلنا",
         "url": "https://www.ilna.ir/rss",
     },
+
     {
         "name": "تابناک",
         "url": "https://www.tabnak.ir/fa/rss/allnews",
     },
+
     {
         "name": "عصر ایران",
         "url": "https://www.asriran.com/fa/rss/allnews",
     },
+
     {
         "name": "فرارو",
         "url": "https://fararu.com/fa/rss",
     },
+
     {
         "name": "خبرآنلاین",
         "url": "https://www.khabaronline.ir/rss",
     },
+
+    {
+        "name": "جهان نیوز",
+        "url": "https://www.jahannews.com/rss",
+    },
+
+    {
+        "name": "آخرین خبر",
+        "url": "https://www.akharinkhabar.ir/rss",
+    },
+
+    {
+        "name": "خبر فوری",
+        "url": "https://www.khabarfouri.com/rss",
+    },
+
+    {
+        "name": "روز پلاس",
+        "url": "https://www.roozplus.com/rss",
+    },
+
+    {
+        "name": "خبرگزاری صدا و سیما",
+        "url": "https://www.iribnews.ir/fa/rss",
+    },
+
 ]
 
 
 # ============================================================
-# سیستان و بلوچستان
+# استان سیستان و بلوچستان
 # ============================================================
 
 PROVINCE_TERMS = [
@@ -113,6 +148,7 @@ PROVINCE_TERMS = [
     "سیستان‌وبلوچستان",
     "سیستان بلوچستان",
 ]
+
 
 CITY_TERMS = [
     "زاهدان",
@@ -147,11 +183,12 @@ CITY_TERMS = [
     "زرآباد",
     "کورین",
     "پیشین",
+    "راسک",
 ]
 
 
 # ============================================================
-# مکران
+# مکران و دریای عمان
 # ============================================================
 
 MAKRAN_TERMS = [
@@ -164,107 +201,139 @@ MAKRAN_TERMS = [
 
 
 # ============================================================
-# موضوعات واقعی محلی
+# نشانه‌های واقعی خبر محلی
 # ============================================================
 
 LOCAL_SUBJECT_TERMS = [
+
     "استاندار",
     "استانداری",
     "فرماندار",
     "فرمانداری",
+
     "شهرستان",
+    "بخشدار",
+    "بخشداری",
+
     "شهرداری",
     "شهردار",
+
     "بندر",
     "بندرگاه",
     "بندر صیادی",
+    "اسکله",
+
     "صیاد",
     "صیادی",
     "ماهیگیری",
     "شیلات",
+
     "کشاورزی",
     "دامداری",
+
     "مرز",
     "مرزبانی",
     "مرزبان",
+
     "سوخت",
     "سوختبر",
+
     "هلال احمر",
     "اورژانس",
+
     "دانشگاه",
     "دانش‌آموز",
     "دانشجو",
+    "مدرسه",
+
     "بیمارستان",
     "پزشک",
+
     "راه",
     "جاده",
     "محور",
+
     "پروژه",
-    "طرح",
+    "طرح عمرانی",
+
     "آب",
     "برق",
     "گاز",
     "آبرسانی",
     "برق‌رسانی",
+
     "گردوغبار",
     "ریزگرد",
     "طوفان",
     "بارندگی",
     "سیل",
     "زلزله",
+
     "حادثه",
     "تصادف",
     "آتش‌سوزی",
     "حریق",
+
     "دستگیری",
     "بازداشت",
     "قاچاق",
     "سرقت",
     "جرم",
+
     "انتظامی",
     "پلیس",
     "فرماندهی انتظامی",
+
     "سپاه",
     "ارتش",
     "نیروی دریایی",
     "رزمایش",
+
     "منطقه آزاد چابهار",
+
     "توسعه",
     "اشتغال",
     "صادرات",
     "واردات",
     "تجارت",
+
     "گردشگری",
     "میراث فرهنگی",
     "محیط زیست",
+
     "ساحل",
     "دریا",
 ]
 
 
 # ============================================================
-# مواردی که نباید خبر استانی شوند
+# موضوعات ممنوع برای بخش استانی
 # ============================================================
 
 SPORT_TERMS = [
+
     "فوتبال",
     "تیم ملی",
     "جام جهانی",
     "جام ملت‌ها",
     "لیگ برتر",
     "لیگ قهرمانان",
+
     "پرسپولیس",
     "استقلال",
     "سپاهان",
     "تراکتور",
     "ذوب آهن",
     "ذوب‌آهن",
+
     "سردار آزمون",
     "مهدی طارمی",
     "علیرضا جهانبخش",
+
     "رونالدو",
     "مسی",
     "امباپه",
+
     "والیبال",
     "بسکتبال",
     "کشتی",
@@ -272,17 +341,22 @@ SPORT_TERMS = [
     "ورزش",
     "ورزشی",
     "المپیک",
+
     "سرمربی",
     "بازیکن",
     "بازیکنان",
+
     "انتقال",
     "گلزنی",
     "گلزن",
+
     "مسابقه",
+    "قهرمانی",
 ]
 
 
 ENTERTAINMENT_TERMS = [
+
     "بازیگر",
     "خواننده",
     "سلبریتی",
@@ -298,10 +372,11 @@ ENTERTAINMENT_TERMS = [
 
 
 # ============================================================
-# خبرهای بسیار مهم ایران
+# کلمات خبرهای بسیار مهم ملی
 # ============================================================
 
 NATIONAL_KEYWORDS = [
+
     "جنگ ایران و آمریکا",
     "جنگ ایران و اسرائیل",
     "جنگ ایران آمریکا",
@@ -361,6 +436,10 @@ NATIONAL_KEYWORDS = [
 
     "حمله به مراکز نظامی ایران",
     "حمله به پایگاه نظامی ایران",
+
+    "تأسیسات هسته‌ای",
+    "تاسیسات هسته‌ای",
+    "نیروگاه هسته‌ای",
 ]
 
 
@@ -461,25 +540,50 @@ def is_approved_domain(url):
 
 
 # ============================================================
-# تیتر
+# حذف کلمات کم‌اهمیت تیتر
 # ============================================================
 
 TITLE_STOPWORDS = {
-    "از", "به", "در", "با", "برای",
-    "و", "یا", "که", "را", "این",
-    "آن", "یک", "بر", "تا", "شد",
-    "شده", "کرد", "کرده", "می",
-    "شود", "خواهد", "اعلام",
-    "خبر", "گفت", "گفتند",
-    "آخرین", "مهم", "فوری",
-    "تصاویر", "ببینید",
-    "جزئیات", "تازه",
+    "از",
+    "به",
+    "در",
+    "با",
+    "برای",
+    "و",
+    "یا",
+    "که",
+    "را",
+    "این",
+    "آن",
+    "یک",
+    "بر",
+    "تا",
+    "شد",
+    "شده",
+    "کرد",
+    "کرده",
+    "می",
+    "شود",
+    "خواهد",
+    "اعلام",
+    "خبر",
+    "گفت",
+    "گفتند",
+    "آخرین",
+    "مهم",
+    "فوری",
+    "تصاویر",
+    "ببینید",
+    "جزئیات",
+    "تازه",
 }
 
 
 def normalize_title(title):
 
-    title = clean_text(title).lower()
+    title = clean_text(
+        title
+    ).lower()
 
     title = re.sub(
         r"[^\w\sآ-ی]",
@@ -503,27 +607,42 @@ def normalize_title(title):
     ]
 
 
-def title_similarity(title_a, title_b):
+def title_similarity(
+    title_a,
+    title_b
+):
 
     words_a = set(
-        normalize_title(title_a)
+        normalize_title(
+            title_a
+        )
     )
 
     words_b = set(
-        normalize_title(title_b)
+        normalize_title(
+            title_b
+        )
     )
 
     if not words_a or not words_b:
         return 0.0
 
-    return len(words_a & words_b) / len(
-        words_a | words_b
+    return (
+        len(words_a & words_b)
+        /
+        len(words_a | words_b)
     )
 
 
-def same_news(item_a, item_b):
+def same_news(
+    item_a,
+    item_b
+):
 
-    if item_a["link"] == item_b["link"]:
+    if (
+        item_a["link"]
+        == item_b["link"]
+    ):
         return True
 
     similarity = title_similarity(
@@ -535,11 +654,15 @@ def same_news(item_a, item_b):
         return True
 
     words_a = set(
-        normalize_title(item_a["title"])
+        normalize_title(
+            item_a["title"]
+        )
     )
 
     words_b = set(
-        normalize_title(item_b["title"])
+        normalize_title(
+            item_b["title"]
+        )
     )
 
     common = words_a & words_b
@@ -636,7 +759,7 @@ def parse_date(entry):
 
 
 # ============================================================
-# خلاصه
+# خلاصه خبر
 # ============================================================
 
 def make_summary(entry):
@@ -684,7 +807,7 @@ def make_summary(entry):
 
 
 # ============================================================
-# تصویر
+# دریافت تصویر
 # ============================================================
 
 def get_image_from_article(url):
@@ -748,7 +871,7 @@ def get_image_from_article(url):
 
 
 # ============================================================
-# RSS
+# دریافت RSS
 # ============================================================
 
 def fetch_feed(source):
@@ -788,36 +911,46 @@ def fetch_feed(source):
 
 
 # ============================================================
-# فیلتر سخت‌گیرانه سیستان و بلوچستان
+# بررسی خبر محلی
 # ============================================================
 
-def is_local_news(title, summary):
+def is_local_news(
+    title,
+    summary
+):
 
-    title = clean_text(title)
-    summary = clean_text(summary)
+    title = clean_text(
+        title
+    )
+
+    summary = clean_text(
+        summary
+    )
 
     title_lower = title.lower()
 
     # --------------------------------------------------------
-    # ۱. حذف ورزش
+    # ۱. حذف قطعی ورزش
     # --------------------------------------------------------
 
     for term in SPORT_TERMS:
 
         if term in title_lower:
+
             return False
 
     # --------------------------------------------------------
-    # ۲. حذف سرگرمی
+    # ۲. حذف قطعی سرگرمی
     # --------------------------------------------------------
 
     for term in ENTERTAINMENT_TERMS:
 
         if term in title_lower:
+
             return False
 
     # --------------------------------------------------------
-    # ۳. باید محل واقعی خبر در عنوان مشخص باشد
+    # ۳. پیدا کردن محل در خود تیتر
     # --------------------------------------------------------
 
     has_province = any(
@@ -835,75 +968,107 @@ def is_local_news(title, summary):
         for term in MAKRAN_TERMS
     )
 
+    # نام محل باید در تیتر باشد.
+    # صرفاً وجود نام شهر در خلاصه کافی نیست.
+
     if not (
         has_province
         or has_city
         or has_makran
     ):
+
         return False
 
     # --------------------------------------------------------
-    # ۴. موضوع خبر باید محلی باشد
+    # ۴. موضوع واقعی محلی
     # --------------------------------------------------------
 
-    has_local_subject = any(
+    local_subject = any(
         term in title
         for term in LOCAL_SUBJECT_TERMS
     )
 
     # --------------------------------------------------------
-    # ۵. اگر عنوان فقط نام استان دارد،
-    # بدون موضوع محلی قبول نکن
+    # ۵. موارد بسیار مشخص محلی
+    # --------------------------------------------------------
+
+    strong_local_terms = [
+
+        "استاندار",
+        "استانداری",
+        "فرماندار",
+        "فرمانداری",
+
+        "زلزله",
+        "سیل",
+        "طوفان",
+        "گردوغبار",
+        "ریزگرد",
+
+        "حادثه",
+        "تصادف",
+        "آتش‌سوزی",
+        "حریق",
+
+        "بازداشت",
+        "دستگیری",
+        "قاچاق",
+
+        "مرز",
+        "مرزبانی",
+        "مرزبان",
+
+        "بندر",
+        "اسکله",
+        "صیاد",
+        "صیادی",
+        "شیلات",
+
+        "چابهار",
+        "زاهدان",
+        "زابل",
+        "سراوان",
+        "ایرانشهر",
+        "خاش",
+
+        "منطقه آزاد چابهار",
+
+        "سواحل مکران",
+        "دریای عمان",
+    ]
+
+    has_strong_local_term = any(
+        term in title
+        for term in strong_local_terms
+    )
+
+    # --------------------------------------------------------
+    # ۶. استان
     # --------------------------------------------------------
 
     if has_province:
 
-        if has_local_subject:
-            return True
-
-        # بعضی عناوین مستقیماً نام یک
-        # رویداد محلی را می‌آورند.
-        local_event_terms = [
-            "حادثه",
-            "زلزله",
-            "سیل",
-            "طوفان",
-            "بارندگی",
-            "گردوغبار",
-            "بازداشت",
-            "قاچاق",
-            "تصادف",
-            "آتش‌سوزی",
-            "حریق",
-            "رزمایش",
-            "مرز",
-            "بندر",
-            "صیاد",
-            "شیلات",
-            "چابهار",
-            "زاهدان",
-            "زابل",
-        ]
-
-        if any(
-            term in title
-            for term in local_event_terms
+        if (
+            local_subject
+            or has_strong_local_term
         ):
             return True
 
         return False
 
     # --------------------------------------------------------
-    # ۶. مکران باید واقعاً موضوع خبر باشد
+    # ۷. مکران
     # --------------------------------------------------------
 
     if has_makran:
 
         makran_subjects = [
+
             "ساحل",
             "سواحل",
             "دریا",
             "بندر",
+            "اسکله",
             "چابهار",
             "صیادی",
             "شیلات",
@@ -920,82 +1085,120 @@ def is_local_news(title, summary):
             "ماهیگیری",
         ]
 
-        if any(
+        return any(
             term in title
             for term in makran_subjects
-        ):
-            return True
-
-        return False
+        )
 
     # --------------------------------------------------------
-    # ۷. شهر به تنهایی کافی نیست
-    # باید موضوع محلی واقعی هم وجود داشته باشد.
+    # ۸. شهر
     # --------------------------------------------------------
 
     if has_city:
 
-        if has_local_subject:
+        # شهر + موضوع واقعی محلی
+        if local_subject:
             return True
 
-        # خبرهایی مثل:
-        # «فلان شخص به زاهدان رفت»
-        # نباید خودکار خبر استانی شوند.
+        if has_strong_local_term:
+            return True
+
         return False
 
     return False
 
 
 # ============================================================
-# امتیاز استانی
+# امتیاز خبر محلی
 # ============================================================
 
-def local_score(title, summary):
+def local_score(
+    title,
+    summary
+):
 
-    title = clean_text(title)
+    title = clean_text(
+        title
+    )
 
     score = 0
 
     for term in PROVINCE_TERMS:
 
         if term in title:
-            score += 200
+            score += 300
 
     for term in CITY_TERMS:
 
         if term in title:
-            score += 100
+            score += 150
 
     for term in MAKRAN_TERMS:
 
         if term in title:
-            score += 100
+            score += 120
 
-    for term in LOCAL_SUBJECT_TERMS:
+    strong_terms = [
+
+        "استاندار",
+        "استانداری",
+        "فرماندار",
+        "فرمانداری",
+        "مرز",
+        "مرزبانی",
+        "بندر",
+        "اسکله",
+        "صیادی",
+        "شیلات",
+        "حادثه",
+        "تصادف",
+        "زلزله",
+        "سیل",
+        "طوفان",
+        "گردوغبار",
+        "قاچاق",
+        "بازداشت",
+        "دستگیری",
+        "پروژه",
+        "توسعه",
+        "اشتغال",
+    ]
+
+    for term in strong_terms:
 
         if term in title:
-            score += 20
+            score += 30
 
     return score
 
 
 # ============================================================
-# امتیاز خبر ملی بسیار مهم
+# امتیاز خبر ملی
 # ============================================================
 
-def national_score(title, summary):
+def national_score(
+    title,
+    summary
+):
 
-    title = clean_text(title)
-    summary = clean_text(summary)
+    title = clean_text(
+        title
+    )
+
+    summary = clean_text(
+        summary
+    )
 
     score = 0
 
     for keyword in NATIONAL_KEYWORDS:
 
         if keyword in title:
-            score += 100
+
+            score += 200
 
     major_actions = [
+
         "حمله",
         "جنگ",
         "بمباران",
@@ -1024,7 +1227,8 @@ def national_score(title, summary):
         has_iran
         and has_major_action
     ):
-        score += 50
+
+        score += 100
 
     return score
 
@@ -1038,7 +1242,8 @@ def is_very_important_national(
         national_score(
             title,
             summary
-        ) >= 100
+        )
+        >= 200
     )
 
 
@@ -1046,28 +1251,35 @@ def is_very_important_national(
 # دسته‌بندی
 # ============================================================
 
-def classify_news(title, summary):
+def classify_news(
+    title,
+    summary
+):
 
     if is_local_news(
         title,
         summary
     ):
+
         return "استان سیستان و بلوچستان"
 
     if is_very_important_national(
         title,
         summary
     ):
+
         return "ایران"
 
     return None
 
 
 # ============================================================
-# حذف تکراری
+# حذف اخبار تکراری
 # ============================================================
 
-def remove_duplicate_news(news):
+def remove_duplicate_news(
+    news
+):
 
     unique = []
 
@@ -1106,13 +1318,16 @@ def remove_duplicate_news(news):
                 break
 
         if not duplicate:
-            unique.append(item)
+
+            unique.append(
+                item
+            )
 
     return unique
 
 
 # ============================================================
-# جمع‌آوری
+# جمع‌آوری اخبار
 # ============================================================
 
 def collect_news():
@@ -1157,6 +1372,7 @@ def collect_news():
             if not title or not link:
                 continue
 
+            # فقط منابع داخلی تأییدشده
             if not is_approved_domain(
                 link
             ):
@@ -1176,6 +1392,7 @@ def collect_news():
                     age < timedelta(0)
                     or age > max_age
                 ):
+
                     continue
 
             summary = make_summary(
@@ -1245,20 +1462,31 @@ def collect_news():
 # انتخاب نهایی
 # ============================================================
 
-def select_news(news):
+def select_news(
+    news,
+    sent_links
+):
 
     local_news = [
         item
         for item in news
-        if item["category"]
-        == "استان سیستان و بلوچستان"
+        if (
+            item["category"]
+            == "استان سیستان و بلوچستان"
+            and item["link"]
+            not in sent_links
+        )
     ]
 
     national_news = [
         item
         for item in news
-        if item["category"]
-        == "ایران"
+        if (
+            item["category"]
+            == "ایران"
+            and item["link"]
+            not in sent_links
+        )
     ]
 
     local_news.sort(
@@ -1279,10 +1507,12 @@ def select_news(news):
 
     selected = []
 
+    # سه خبر استانی
     selected.extend(
         local_news[:3]
     )
 
+    # یک خبر بسیار مهم ایران
     selected.extend(
         national_news[:1]
     )
@@ -1503,7 +1733,9 @@ def send_photo(
             f"Photo send failed: {exc}"
         )
 
-        return send_text(item)
+        return send_text(
+            item
+        )
 
 
 # ============================================================
@@ -1521,7 +1753,7 @@ def main():
     )
 
     print(
-        "STRICT NEWS FILTER v4"
+        "STRICT NEWS FILTER v5"
     )
 
     print(
@@ -1547,7 +1779,8 @@ def main():
     )
 
     selected = select_news(
-        news
+        news,
+        sent_links
     )
 
     print(
@@ -1584,15 +1817,6 @@ def main():
     for item in selected:
 
         link = item["link"]
-
-        if link in sent_links:
-
-            print(
-                "Already sent:",
-                item["title"]
-            )
-
-            continue
 
         print(
             "Publishing:",
