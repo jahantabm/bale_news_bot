@@ -131,7 +131,7 @@ BLOCKED_DOMAINS = {
 
 
 # ============================================================
-# SISTAN & BALUCHESTAN / MAKRAN
+# SIستان و بلوچستان / MAKRAN
 # ============================================================
 
 PROVINCE_TERMS = [
@@ -140,7 +140,6 @@ PROVINCE_TERMS = [
     "سیستان‌وبلوچستان",
     "استان سیستان و بلوچستان",
 ]
-
 
 CITY_TERMS = [
     "زاهدان",
@@ -173,9 +172,21 @@ CITY_TERMS = [
     "دُرّی",
 ]
 
+MAKRAN_TERMS = [
+    "سواحل مکران",
+    "ساحل مکران",
+    "مکران",
+    "دریای عمان",
+    "سواحل دریای عمان",
+    "ساحل دریای عمان",
+]
+
 
 # ============================================================
 # OTHER IRANIAN PROVINCES
+# IMPORTANT:
+# These are used to prevent unrelated provincial news
+# from entering the Sistan & Baluchestan section.
 # ============================================================
 
 OTHER_PROVINCE_TERMS = [
@@ -213,21 +224,7 @@ OTHER_PROVINCE_TERMS = [
 
 
 # ============================================================
-# MAKRAN
-# ============================================================
-
-MAKRAN_TERMS = [
-    "سواحل مکران",
-    "ساحل مکران",
-    "مکران",
-    "دریای عمان",
-    "سواحل دریای عمان",
-    "ساحل دریای عمان",
-]
-
-
-# ============================================================
-# TERMS THAT INDICATE REAL LOCAL NEWS
+# TERMS THAT STRONGLY INDICATE A REAL LOCAL NEWS SUBJECT
 # ============================================================
 
 LOCAL_CONTEXT_TERMS = [
@@ -261,6 +258,10 @@ LOCAL_CONTEXT_TERMS = [
     "مصدوم",
     "نجات",
     "امداد",
+    "مأمور انتظامی",
+    "نیروی انتظامی",
+    "فراجا",
+    "پلیس",
 
     # پروژه و توسعه
     "افتتاح",
@@ -621,33 +622,21 @@ def contains_any(text, terms):
     )
 
 
-def count_terms(text, terms):
-    return sum(
-        1
-        for term in terms
-        if term in text
-    )
-
-
-def other_province_in_title(title):
+def has_other_province_in_title(title):
     """
-    Return another Iranian province found in the title.
+    If another Iranian province appears explicitly
+    in the title, reject it from Sistan & Baluchestan.
+    This fixes cases such as:
+    «معاون استاندار بوشهر: ...»
     """
+
+    title = clean_text(title)
 
     for province in OTHER_PROVINCE_TERMS:
-
         if province in title:
-            return province
+            return True
 
-    return None
-
-
-def other_provinces_in_text(text):
-    return [
-        province
-        for province in OTHER_PROVINCE_TERMS
-        if province in text
-    ]
+    return False
 
 
 def local_score(
@@ -666,114 +655,74 @@ def local_score(
     score = 0
 
     # --------------------------------------------------------
-    # STRONG PROVINCE EVIDENCE
+    # OTHER PROVINCE HARD PENALTY
     # --------------------------------------------------------
 
-    province_in_title = False
+    if has_other_province_in_title(title):
+        score -= 100
+
+    # --------------------------------------------------------
+    # STRONG LOCATION EVIDENCE
+    # --------------------------------------------------------
 
     for term in PROVINCE_TERMS:
-
         if term in title:
-            score += 40
-            province_in_title = True
+            score += 30
 
         elif term in summary:
-            score += 15
+            score += 10
 
     # --------------------------------------------------------
-    # CITY EVIDENCE
+    # CITY IN TITLE IS ONLY SUPPORTING EVIDENCE
     # --------------------------------------------------------
 
     city_in_title = False
 
     for term in CITY_TERMS:
-
         if term in title:
-            score += 12
+            score += 8
             city_in_title = True
-
-        elif term in summary:
-            score += 5
 
     # --------------------------------------------------------
     # MAKRAN / OMAN SEA
     # --------------------------------------------------------
 
     for term in MAKRAN_TERMS:
-
         if term in title:
-            score += 25
+            score += 20
 
         elif term in summary:
-            score += 10
+            score += 8
 
     # --------------------------------------------------------
-    # REAL LOCAL CONTEXT
+    # REAL LOCAL NEWS CONTEXT
     # --------------------------------------------------------
 
-    context_count = count_terms(
-        full_text,
-        LOCAL_CONTEXT_TERMS,
-    )
+    context_count = 0
+
+    for term in LOCAL_CONTEXT_TERMS:
+        if term in full_text:
+            context_count += 1
 
     score += min(
         context_count * 5,
-        30,
+        25,
     )
 
     # --------------------------------------------------------
-    # OTHER PROVINCE IN TITLE
-    # --------------------------------------------------------
-
-    other_title_province = (
-        other_province_in_title(title)
-    )
-
-    if other_title_province:
-
-        # Another province in title without
-        # Sistan & Baluchestan in title is a strong
-        # indication that this is not our local news.
-        if not contains_any(
-            title,
-            PROVINCE_TERMS,
-        ):
-            score -= 100
-
-    # --------------------------------------------------------
-    # OTHER PROVINCE IN SUMMARY
-    # --------------------------------------------------------
-
-    other_provinces = (
-        other_provinces_in_text(full_text)
-    )
-
-    if (
-        other_provinces
-        and not province_in_title
-        and not city_in_title
-        and not contains_any(
-            title,
-            MAKRAN_TERMS,
-        )
-    ):
-        score -= 40
-
-    # --------------------------------------------------------
-    # UNRELATED TOPICS
+    # EXPLICITLY UNRELATED TOPICS
     # --------------------------------------------------------
 
     for term in LOCAL_EXCLUDE_TERMS:
-
         if term in full_text:
-            score -= 60
+            score -= 50
 
     # --------------------------------------------------------
-    # CITY WITHOUT LOCAL CONTEXT
+    # NATIONAL / GENERAL NEWS PENALTY
     # --------------------------------------------------------
 
     if city_in_title and context_count == 0:
-        score -= 25
+        score -= 20
 
     return score
 
@@ -792,24 +741,24 @@ def is_real_local_news(
     )
 
     # --------------------------------------------------------
-    # EMPTY TITLE
+    # HARD REJECTION:
+    # Other province explicitly named in title.
     # --------------------------------------------------------
 
-    if not title:
+    if has_other_province_in_title(title):
         return False
 
     # --------------------------------------------------------
     # HARD REJECTION:
-    # EXPLICITLY UNRELATED TOPICS
+    # Explicitly unrelated subjects.
     # --------------------------------------------------------
 
     for term in LOCAL_EXCLUDE_TERMS:
-
         if term in full_text:
             return False
 
     # --------------------------------------------------------
-    # LOCAL LOCATION
+    # LOCATION MUST EXIST.
     # --------------------------------------------------------
 
     has_province = contains_any(
@@ -827,35 +776,12 @@ def is_real_local_news(
         MAKRAN_TERMS,
     )
 
-    # --------------------------------------------------------
-    # NO LOCAL LOCATION
-    # --------------------------------------------------------
-
     if not (
         has_province
         or has_city
         or has_makran
     ):
         return False
-
-    # --------------------------------------------------------
-    # OTHER PROVINCE IN TITLE
-    # --------------------------------------------------------
-
-    other_title_province = (
-        other_province_in_title(title)
-    )
-
-    if other_title_province:
-
-        # Another province is in the title.
-        # Unless Sistan & Baluchestan is ALSO explicitly
-        # in the title, reject.
-        if not contains_any(
-            title,
-            PROVINCE_TERMS,
-        ):
-            return False
 
     # --------------------------------------------------------
     # SCORE
@@ -867,14 +793,14 @@ def is_real_local_news(
     )
 
     # --------------------------------------------------------
-    # EXPLICIT PROVINCE IN TITLE
+    # PROVINCE IN TITLE
     # --------------------------------------------------------
 
     if contains_any(
         title,
         PROVINCE_TERMS,
     ):
-        return score >= 30
+        return score >= 20
 
     # --------------------------------------------------------
     # MAKRAN IN TITLE
@@ -884,44 +810,22 @@ def is_real_local_news(
         title,
         MAKRAN_TERMS,
     ):
-        return score >= 25
+        return score >= 20
 
     # --------------------------------------------------------
-    # CITY IN TITLE
+    # CITY NAME ALONE IS NEVER ENOUGH
     # --------------------------------------------------------
 
-    if contains_any(
-        title,
-        CITY_TERMS,
-    ):
+    context_count = sum(
+        1
+        for term in LOCAL_CONTEXT_TERMS
+        if term in full_text
+    )
 
-        context_count = count_terms(
-            full_text,
-            LOCAL_CONTEXT_TERMS,
-        )
+    if has_city and context_count < 1:
+        return False
 
-        if context_count < 1:
-            return False
-
-        return score >= 15
-
-    # --------------------------------------------------------
-    # LOCATION ONLY IN SUMMARY
-    # --------------------------------------------------------
-
-    if has_province or has_makran:
-
-        context_count = count_terms(
-            full_text,
-            LOCAL_CONTEXT_TERMS,
-        )
-
-        if context_count < 1:
-            return False
-
-        return score >= 15
-
-    return False
+    return score >= 15
 
 
 # ============================================================
@@ -941,7 +845,6 @@ def national_score(
     score = 0
 
     for term in MAJOR_NATIONAL_TERMS:
-
         if term in text:
             score += 10
 
@@ -967,7 +870,6 @@ def is_exceptional_national_news(
 
 def fetch_feed(url):
     try:
-
         response = SESSION.get(
             url,
             timeout=20,
@@ -980,7 +882,6 @@ def fetch_feed(url):
         )
 
     except Exception as exc:
-
         print(
             f"RSS feed error: {exc}"
         )
@@ -1064,7 +965,6 @@ def collect_source(
 
 
 def collect_all_news():
-
     now = datetime.now(
         timezone.utc
     )
@@ -1107,7 +1007,6 @@ def collect_all_news():
     for item in collected:
 
         if item["link"] not in unique:
-
             unique[
                 item["link"]
             ] = item
@@ -1239,7 +1138,6 @@ def select_national_news(
 # ============================================================
 
 def get_image_from_article(url):
-
     try:
 
         response = SESSION.get(
@@ -1301,7 +1199,6 @@ def bale_request(
     data=None,
     files=None,
 ):
-
     url = (
         "https://tapi.bale.ai/"
         f"bot{BOT_TOKEN}/{method}"
@@ -1315,11 +1212,9 @@ def bale_request(
     )
 
     try:
-
         result = response.json()
 
     except Exception:
-
         result = {
             "ok": False,
             "description": response.text,
@@ -1332,7 +1227,6 @@ def bale_request(
             False,
         )
     ):
-
         raise RuntimeError(
             f"Bale API error: "
             f"{result}"
@@ -1360,6 +1254,9 @@ SOROUSH_URL = (
 
 # ============================================================
 # MESSAGE
+# IMPORTANT:
+# Social URLs are NO LONGER printed in the message text.
+# They are placed inside the Inline Keyboard.
 # ============================================================
 
 def build_message(item):
@@ -1375,7 +1272,6 @@ def build_message(item):
     )
 
     if item["summary"]:
-
         text += (
             item["summary"]
             + "\n\n"
@@ -1386,34 +1282,31 @@ def build_message(item):
         f"{item['source']}"
     )
 
+    text += (
+        "\n\n"
+        "📱 جهان‌تاب"
+    )
+
     return text
 
 
 # ============================================================
-# INLINE LINK BOX
+# INLINE KEYBOARD
+# ALL LINKS ARE NOW INSIDE THE BOX
 # ============================================================
 
-def make_reply_markup(item):
-
+def build_reply_markup(
+    article_url,
+):
     return json.dumps(
         {
             "inline_keyboard": [
-
-                # --------------------------------------------
-                # NEWS LINK
-                # --------------------------------------------
-
                 [
                     {
                         "text": "🔗 مشاهده خبر",
-                        "url": item["link"],
+                        "url": article_url,
                     }
                 ],
-
-                # --------------------------------------------
-                # SOCIAL LINKS
-                # --------------------------------------------
-
                 [
                     {
                         "text": "📨 تلگرام",
@@ -1440,8 +1333,8 @@ def make_reply_markup(item):
 
 def send_text(item):
 
-    reply_markup = make_reply_markup(
-        item
+    reply_markup = build_reply_markup(
+        item["link"]
     )
 
     return bale_request(
@@ -1462,7 +1355,6 @@ def send_photo(
     item,
     image_url,
 ):
-
     try:
 
         response = SESSION.get(
@@ -1480,7 +1372,6 @@ def send_photo(
         if not content_type.startswith(
             "image/"
         ):
-
             raise RuntimeError(
                 "URL did not return image"
             )
@@ -1501,15 +1392,14 @@ def send_photo(
             )
         }
 
-        reply_markup = make_reply_markup(
-            item
+        reply_markup = build_reply_markup(
+            item["link"]
         )
 
         caption = build_message(
             item
         )
 
-        # Bale caption limit protection
         caption = caption[:1000]
 
         return bale_request(
@@ -1543,7 +1433,6 @@ def publish_item(item):
     )
 
     if image_url:
-
         return send_photo(
             item,
             image_url,
@@ -1605,7 +1494,7 @@ def main():
     for item in local_news:
 
         item["category"] = (
-            "سیستان و بلوچستان"
+            "استان سیستان و بلوچستان"
         )
 
         print(
