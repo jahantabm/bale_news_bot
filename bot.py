@@ -1,44 +1,27 @@
 # -*- coding: utf-8 -*-
 
 """
-============================================================
-🌐 JAHANTAB | جهان‌تاب
+JAHANTAB | جهان‌تاب
 آخرین تحولات سیستان و بلوچستان
 
-نسخه نهایی
+نسخه 6.0
 
 ویژگی‌ها:
-- فقط منابع خبری داخلی و مورد تأیید
+- فقط منابع خبری داخلی تعریف‌شده
 - تمرکز تخصصی روی سیستان و بلوچستان
-- فیلتر دقیق محلی
-- جلوگیری از ورود اخبار سایر استان‌ها
-- پوشش:
-    * اخبار سیاسی و مدیریتی استان
-    * حوادث و انتظامی
-    * اقتصاد و توسعه
-    * آب و محیط زیست
-    * هامون
-    * هیرمند
-    * جازموریان
-    * مکران
-    * دریای عمان
-    * چابهار
-    * فرهنگ و هنر
-    * موسیقی
-    * میراث فرهنگی
-    * گردشگری
-    * ادبیات و رسانه
-    * اقوام و آیین‌های محلی
-- حذف اخبار ورزشی سراسری
-- حذف اخبار هنری غیرمرتبط
-- حذف اخبار سایر استان‌ها
-- حذف خبرهای تکراری
-- جلوگیری از اجرای همزمان دو نسخه بات
-- ارسال حداکثر یک خبر در هر ۳۰ دقیقه
-- لینک خبر + شبکه‌های اجتماعی داخل Inline Keyboard
-- دریافت تصویر خبر در صورت وجود
-- نگهداری لینک‌های ارسال‌شده
-============================================================
+- پوشش شهرها و شهرستان‌های استان
+- پوشش فرهنگ، هنر، موسیقی و میراث
+- پوشش هامون، هیرمند، جازموریان، مکران و دریای عمان
+- حذف خبرهای سایر استان‌ها
+- حذف خبرهای خارجی نامرتبط
+- حذف موضوعات ورزشی/هنری سراسری نامرتبط
+- ضدتکرار بر اساس URL
+- ضدتکرار بر اساس عنوان نرمال‌شده
+- ضدتکرار بر اساس شباهت عنوان
+- حداکثر یک خبر در هر 30 دقیقه
+- دکمه مشاهده خبر
+- دکمه‌های تلگرام، بله و سروش
+- تصویر خبر در صورت وجود
 """
 
 import os
@@ -47,6 +30,8 @@ import json
 import html
 import time
 import hashlib
+import calendar
+
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse
 
@@ -64,16 +49,15 @@ CHAT_ID = os.getenv("BALE_CHAT_ID")
 
 STATE_FILE = "sent_links.txt"
 TITLE_STATE_FILE = "sent_titles.txt"
-LOCK_FILE = "jahantab_bot.lock"
 
-# هر ۳۰ دقیقه
-RUN_INTERVAL_SECONDS = 30 * 60
+# هر 30 دقیقه یک خبر
+PUBLISH_INTERVAL = 30 * 60
 
 # حداکثر سن خبر
 MAX_NEWS_AGE_HOURS = 24
 
-# حداکثر تعداد خبر در هر اجرا
-MAX_NEWS_PER_RUN = 1
+# تعداد خبر در هر چرخه
+MAX_NEWS_PER_CYCLE = 1
 
 
 if not BOT_TOKEN:
@@ -84,7 +68,7 @@ if not CHAT_ID:
 
 
 # ============================================================
-# ONLY APPROVED INTERNAL IRANIAN NEWS SOURCES
+# APPROVED INTERNAL IRANIAN NEWS SOURCES
 # ============================================================
 
 SOURCES = [
@@ -131,6 +115,18 @@ SOURCES = [
 
     ("خبرآنلاین", "khabaronline.ir", [
         "https://www.khabaronline.ir/rss",
+    ]),
+
+    ("آخرین خبر", "akharinkhabar.ir", [
+        "https://akharinkhabar.ir/rss",
+    ]),
+
+    ("خبر فوری", "khabarfouri.com", [
+        "https://www.khabarfouri.com/rss",
+    ]),
+
+    ("روز پلاس", "roozplus.com", [
+        "https://roozplus.com/rss",
     ]),
 
     ("همشهری", "hamshahrionline.ir", [
@@ -184,6 +180,7 @@ PROVINCE_TERMS = [
     "سیستان و بلوچستان",
     "سیستان‌ و بلوچستان",
     "سیستان‌وبلوچستان",
+    "سیستان وبلوچستان",
     "استان سیستان و بلوچستان",
     "استان سیستان‌ و بلوچستان",
     "استان سیستان‌وبلوچستان",
@@ -191,11 +188,10 @@ PROVINCE_TERMS = [
 
 
 # ============================================================
-# CITIES / COUNTIES
+# CITIES / COUNTIES / LOCAL AREAS
 # ============================================================
 
 CITY_TERMS = [
-
     "زاهدان",
     "زابل",
     "چابهار",
@@ -218,49 +214,56 @@ CITY_TERMS = [
     "دشتیاری",
     "مهرستان",
     "سیب و سوران",
-    "سیب‌ و سوران",
     "نیمروز",
     "بنت",
     "پیشین",
     "گشت",
     "تفتان",
-    "دُرّی",
-    "بمپور",
+    "بزمان",
     "محمدان",
-    "راسک",
-    "پارود",
-    "بخش سرباز",
+    "نگور",
+    "اسپکه",
     "لاشار",
     "آشار",
-    "نوک‌آباد",
-    "میرجاوه",
-    "ریمدان",
-    "پسابندر",
-    "نگور",
+    "راسک",
+    "پلان",
     "زرآباد",
-    "بزمان",
+    "باهوکلات",
+    "گلمورتی",
+    "زابلی",
+    "ادیمی",
+    "نوک‌آباد",
+    "نوک آباد",
+    "دشتیاری",
+    "کلات",
 ]
 
 
 # ============================================================
-# NATURAL / GEOGRAPHICAL AREAS
+# SPECIAL LOCAL GEOGRAPHY
 # ============================================================
 
-GEOGRAPHICAL_TERMS = [
+LOCAL_GEOGRAPHY_TERMS = [
 
     # هامون
     "هامون",
     "تالاب هامون",
     "دریاچه هامون",
+    "هامون صابری",
+    "هامون هیرمند",
 
     # هیرمند
-    "هیرمند",
     "رودخانه هیرمند",
     "رود هیرمند",
+    "هیرمند",
+    "حقابه هیرمند",
+    "حق‌آبه هیرمند",
+    "آب هیرمند",
 
     # جازموریان
     "جازموریان",
     "تالاب جازموریان",
+    "حوضه جازموریان",
 
     # مکران
     "مکران",
@@ -273,100 +276,152 @@ GEOGRAPHICAL_TERMS = [
     "ساحل دریای عمان",
 
     # چابهار
-    "خلیج چابهار",
     "بندر چابهار",
+    "منطقه آزاد چابهار",
+    "مکران جنوبی",
 ]
 
 
 # ============================================================
-# CULTURE / ART / MUSIC / HERITAGE
+# LOCAL CULTURE / ART / MUSIC / HERITAGE
 # ============================================================
 
-CULTURE_TERMS = [
+LOCAL_CULTURE_TERMS = [
 
-    "فرهنگ سیستان و بلوچستان",
+    # فرهنگ
     "فرهنگ سیستان",
     "فرهنگ بلوچستان",
+    "فرهنگ سیستان و بلوچستان",
     "فرهنگ بلوچ",
-    "فرهنگ زابلی",
-    "هنر سیستان و بلوچستان",
+    "فرهنگ بومی بلوچستان",
+    "فرهنگ بومی سیستان",
+
+    # هنر
+    "هنر سیستان",
+    "هنر بلوچستان",
     "هنرمندان سیستان و بلوچستان",
     "هنرمند سیستان و بلوچستان",
+    "هنر بومی بلوچستان",
+    "صنایع دستی سیستان و بلوچستان",
+    "صنایع‌دستی سیستان و بلوچستان",
 
     # موسیقی
-    "موسیقی سیستان و بلوچستان",
-    "موسیقی بلوچستان",
     "موسیقی سیستان",
+    "موسیقی بلوچستان",
     "موسیقی بلوچ",
-    "موسیقی محلی سیستان",
-    "موسیقی محلی بلوچستان",
-    "هنرمند موسیقی بلوچ",
+    "موسیقی سیستان و بلوچستان",
+    "هنرمند بلوچ",
     "خواننده بلوچ",
     "خواننده سیستانی",
     "نوازنده بلوچ",
-    "موسیقی محلی",
+    "موسیقی بومی بلوچستان",
+    "موسیقی محلی بلوچستان",
+    "موسیقی محلی سیستان",
 
-    # سازها
-    "قیچک",
-    "رباب",
-    "دونلی",
-    "دهلک",
-    "سرود بلوچی",
-    "آواز بلوچی",
+    # ادبیات
+    "شاعر بلوچ",
+    "شاعر سیستانی",
+    "شاعران بلوچ",
+    "ادبیات بلوچستان",
+    "ادبیات سیستان",
 
-    # میراث فرهنگی
-    "میراث فرهنگی سیستان",
-    "میراث فرهنگی بلوچستان",
+    # میراث
     "میراث فرهنگی سیستان و بلوچستان",
-    "صنایع دستی سیستان",
-    "صنایع دستی بلوچستان",
-    "صنایع دستی سیستان و بلوچستان",
+    "میراث فرهنگی بلوچستان",
+    "میراث فرهنگی سیستان",
+    "باستان‌شناسی سیستان و بلوچستان",
+    "باستان شناسی سیستان و بلوچستان",
+    "آثار باستانی سیستان و بلوچستان",
+    "محوطه باستانی سیستان و بلوچستان",
 
-    # آیین‌ها
-    "آیین بلوچ",
-    "آیین‌های بلوچ",
-    "آیین سیستانی",
-    "آیین‌های سیستان",
-    "جشنواره فرهنگی",
-    "جشنواره هنری",
-    "جشنواره موسیقی",
-
-    # گردشگری
-    "گردشگری سیستان و بلوچستان",
-    "گردشگری بلوچستان",
-    "گردشگری سیستان",
-    "جاذبه گردشگری",
-    "میراث تاریخی",
-    "محوطه تاریخی",
-    "باستان‌شناسی",
-    "باستان شناسی",
+    # بناها و آثار شاخص
     "شهر سوخته",
     "کوه خواجه",
     "قلعه رستم",
     "قلعه ناصری",
-    "چاه‌نیمه",
+    "قلعه بمپور",
+    "روستای کلپور",
+    "کلپورگان",
+    "سفال کلپورگان",
+    "سفالگری کلپورگان",
+    "سوزن‌دوزی بلوچ",
+    "سوزن دوزی بلوچ",
+    "حصیربافی",
+    "بلوچی‌دوزی",
+    "بلوچی دوزی",
 ]
 
 
 # ============================================================
-# LOCAL CONTEXT
+# LOCAL ECONOMY / SOCIETY / ENVIRONMENT
 # ============================================================
 
-LOCAL_CONTEXT_TERMS = [
+LOCAL_SUBJECT_TERMS = [
+
+    # آب
+    "آبرسانی",
+    "تنش آبی",
+    "کمبود آب",
+    "بحران آب",
+    "آب شرب",
+    "آب آشامیدنی",
+    "حقابه",
+    "حق‌آبه",
+
+    # محیط زیست
+    "محیط زیست",
+    "محیط‌زیست",
+    "خشکسالی",
+    "گرد و غبار",
+    "ریزگرد",
+    "تالاب",
+    "حیات وحش",
+    "حیات‌وحش",
+    "منطقه حفاظت شده",
+    "منطقه حفاظت‌شده",
+
+    # کشاورزی
+    "کشاورزی",
+    "نخلستان",
+    "خرما",
+    "دامداری",
+    "مراتع",
+
+    # دریا و صید
+    "صیادی",
+    "ماهیگیری",
+    "شیلات",
+    "صید",
+    "لنج",
+    "بندر",
+    "کشتیرانی",
+
+    # توسعه
+    "پروژه",
+    "طرح توسعه",
+    "زیرساخت",
+    "راه",
+    "جاده",
+    "راه‌آهن",
+    "راه آهن",
+    "فرودگاه",
+    "بیمارستان",
+    "مدرسه",
+    "دانشگاه",
+    "بندر",
+    "منطقه آزاد",
 
     # مدیریت استان
     "استاندار",
     "استانداری",
-    "معاون استاندار",
     "فرماندار",
     "فرمانداری",
-    "مدیرکل",
+    "معاون استاندار",
     "نماینده ولی فقیه",
     "مجمع نمایندگان",
     "نماینده مردم",
-    "نماینده مجلس",
 
-    # امنیت / انتظامی
+    # حوادث و انتظامی
     "حادثه",
     "تصادف",
     "آتش‌سوزی",
@@ -375,8 +430,8 @@ LOCAL_CONTEXT_TERMS = [
     "سیل",
     "طوفان",
     "بارندگی",
-    "کشف",
     "قاچاق",
+    "کشف",
     "توقیف",
     "دستگیری",
     "بازداشت",
@@ -390,98 +445,6 @@ LOCAL_CONTEXT_TERMS = [
     "نیروی انتظامی",
     "فراجا",
     "پلیس",
-    "امنیتی",
-    "نظامی",
-    "مرزبانی",
-    "مرز",
-    "مرزبان",
-
-    # توسعه
-    "افتتاح",
-    "بهره‌برداری",
-    "بهره برداری",
-    "پروژه",
-    "طرح",
-    "ساخت",
-    "توسعه",
-    "اعتبار",
-    "سرمایه‌گذاری",
-    "سرمایه گذاری",
-    "زیرساخت",
-    "راه",
-    "جاده",
-    "بندر",
-    "بیمارستان",
-    "مدرسه",
-    "دانشگاه",
-    "فرودگاه",
-    "راه‌آهن",
-    "راه آهن",
-
-    # اقتصاد
-    "اقتصاد",
-    "بازرگانی",
-    "تجارت",
-    "اشتغال",
-    "کارآفرینی",
-    "صنعت",
-    "معدن",
-    "بازار",
-    "سرمایه‌گذار",
-
-    # آب و کشاورزی
-    "آب",
-    "آبرسانی",
-    "برق",
-    "گاز",
-    "کشاورزی",
-    "دامداری",
-    "صیادی",
-    "ماهیگیری",
-    "شیلات",
-    "محیط زیست",
-    "خشکسالی",
-    "تالاب",
-    "رودخانه",
-
-    # مکران
-    "بندر چابهار",
-    "منطقه آزاد چابهار",
-    "سواحل مکران",
-    "ساحل مکران",
-    "دریای عمان",
-    "کشتیرانی",
-]
-
-
-# ============================================================
-# LOCAL CULTURAL CONTEXT
-# ============================================================
-
-LOCAL_CULTURAL_CONTEXT = [
-
-    "فرهنگ",
-    "هنر",
-    "موسیقی",
-    "هنرمند",
-    "خواننده",
-    "نوازنده",
-    "جشنواره",
-    "نمایشگاه",
-    "میراث فرهنگی",
-    "صنایع دستی",
-    "گردشگری",
-    "باستان‌شناسی",
-    "باستان شناسی",
-    "آیین",
-    "سنت",
-    "ادبیات",
-    "شاعر",
-    "شعر",
-    "کتاب",
-    "موزه",
-    "اثر تاریخی",
-    "محوطه تاریخی",
 ]
 
 
@@ -490,7 +453,6 @@ LOCAL_CULTURAL_CONTEXT = [
 # ============================================================
 
 OTHER_PROVINCE_TERMS = [
-
     "آذربایجان شرقی",
     "آذربایجان غربی",
     "اردبیل",
@@ -525,13 +487,60 @@ OTHER_PROVINCE_TERMS = [
 
 
 # ============================================================
-# NATIONWIDE TOPICS THAT MUST NOT ENTER LOCAL SECTION
+# FOREIGN LOCATION TERMS
 # ============================================================
 
-LOCAL_EXCLUDE_TERMS = [
+FOREIGN_LOCATION_TERMS = [
+    "سوریه",
+    "ترکیه",
+    "عراق",
+    "پاکستان",
+    "افغانستان",
+    "لبنان",
+    "یمن",
+    "غزه",
+    "اسرائیل",
+    "فلسطین",
+    "اردن",
+    "عربستان",
+    "قطر",
+    "امارات",
+    "آمریکا",
+    "ایالات متحده",
+    "روسیه",
+    "اوکراین",
+    "چین",
+    "هند",
+    "فرانسه",
+    "آلمان",
+    "انگلیس",
+    "بریتانیا",
+    "سازمان ملل",
+    "نیویورک",
+    "واشنگتن",
+    "لندن",
+    "پاریس",
+    "مسکو",
+    "آنکارا",
+    "دمشق",
+    "بغداد",
+    "کابل",
+    "اسلام‌آباد",
+    "اسلام آباد",
+    "تل‌آویو",
+    "تل آویو",
+]
+
+
+# ============================================================
+# GENERIC NATIONAL / UNRELATED TOPICS
+# ============================================================
+
+UNRELATED_TERMS = [
 
     # ورزش سراسری
     "سردار آزمون",
+    "مهدی طارمی",
     "تیم ملی فوتبال",
     "تیم ملی",
     "فوتبال",
@@ -542,47 +551,22 @@ LOCAL_EXCLUDE_TERMS = [
     "جام جهانی",
     "بازیکن",
     "مربی",
-    "ورزش",
+    "ورزشگاه",
 
-    # هنر سراسری
+    # سرگرمی سراسری
+    "سلبریتی",
+    "بازیگر",
+    "فیلم",
+    "سریال",
     "آگاتا کریستی",
     "خانم مارپل",
     "مارپل",
 
-    # موضوعات عمومی
+    # موضوعات عمومی غیرمحلی
     "فال",
-    "مد",
-    "زیبایی",
+    "طالع بینی",
+    "مد و زیبایی",
     "سبک زندگی",
-]
-
-
-# ============================================================
-# NATIONAL EXCEPTION
-# ============================================================
-
-MAJOR_NATIONAL_TERMS = [
-
-    "حمله آمریکا به ایران",
-    "حمله ایالات متحده به ایران",
-    "حمله اسرائیل به ایران",
-    "حمله رژیم صهیونیستی به ایران",
-    "جنگ ایران و آمریکا",
-    "جنگ ایران و اسرائیل",
-    "درگیری مستقیم ایران و آمریکا",
-    "درگیری مستقیم ایران و اسرائیل",
-    "آغاز جنگ",
-    "آغاز حمله نظامی",
-    "حمله گسترده به ایران",
-    "حمله موشکی گسترده به ایران",
-    "حمله هوایی گسترده به ایران",
-    "حمله پهپادی گسترده به ایران",
-    "عملیات نظامی گسترده علیه ایران",
-    "بسته شدن تنگه هرمز",
-    "تعطیلی سراسری کشور",
-    "زلزله بسیار بزرگ",
-    "سیل گسترده در کشور",
-    "بحران ملی",
 ]
 
 
@@ -601,7 +585,7 @@ SESSION.headers.update({
 
 
 # ============================================================
-# TEXT HELPERS
+# TEXT NORMALIZATION
 # ============================================================
 
 def clean_text(value):
@@ -630,7 +614,7 @@ def clean_text(value):
     return value.strip()
 
 
-def normalize_persian_text(text):
+def normalize_persian(text):
 
     text = clean_text(text)
 
@@ -644,13 +628,21 @@ def normalize_persian_text(text):
         "إ": "ا",
         "أ": "ا",
         "‌": " ",
+        "\u200c": " ",
+        "\u200f": " ",
+        "\u200e": " ",
     }
 
     for old, new in replacements.items():
-        text = text.replace(
-            old,
-            new,
-        )
+        text = text.replace(old, new)
+
+    # حذف علائم نگارشی برای مقایسه
+    text = re.sub(
+        r"[^\w\sآ-ی]",
+        " ",
+        text,
+        flags=re.UNICODE,
+    )
 
     text = re.sub(
         r"\s+",
@@ -658,24 +650,58 @@ def normalize_persian_text(text):
         text,
     )
 
-    return text.strip()
+    return text.strip().lower()
 
 
-def title_key(title):
+def title_fingerprint(title):
 
-    text = normalize_persian_text(
-        title
-    )
+    normalized = normalize_persian(title)
 
-    # حذف علائم
-    text = re.sub(
-        r"[^\w\u0600-\u06FF]+",
-        "",
-        text,
-    )
+    words = normalized.split()
 
-    return text.lower()
+    # حذف کلمات بسیار عمومی
+    stop_words = {
+        "در",
+        "به",
+        "از",
+        "با",
+        "برای",
+        "یک",
+        "این",
+        "آن",
+        "شد",
+        "شدند",
+        "کرد",
+        "کرده",
+        "اعلام",
+        "خبر",
+        "گفت",
+        "گفتند",
+    }
 
+    words = [
+        word
+        for word in words
+        if word not in stop_words
+    ]
+
+    words = sorted(set(words))
+
+    return " ".join(words)
+
+
+def title_hash(title):
+
+    fingerprint = title_fingerprint(title)
+
+    return hashlib.sha256(
+        fingerprint.encode("utf-8")
+    ).hexdigest()
+
+
+# ============================================================
+# URL
+# ============================================================
 
 def normalize_url(url):
 
@@ -688,6 +714,7 @@ def normalize_url(url):
         r"[?&](utm_[^&]+|fbclid|gclid)=[^&]*",
         "",
         url,
+        flags=re.IGNORECASE,
     )
 
     return url.rstrip("?&")
@@ -755,101 +782,18 @@ def is_allowed_source_url(
 
 
 # ============================================================
-# LOCK
+# STATE
 # ============================================================
 
-def acquire_lock():
+def load_state_file(path):
 
-    try:
-
-        if os.path.exists(
-            LOCK_FILE
-        ):
-
-            try:
-
-                with open(
-                    LOCK_FILE,
-                    "r",
-                    encoding="utf-8",
-                ) as file:
-
-                    old_pid = (
-                        file.read()
-                        .strip()
-                    )
-
-                print(
-                    "Another Jahantab "
-                    "instance is already "
-                    f"running. PID: {old_pid}"
-                )
-
-            except Exception:
-
-                print(
-                    "Another Jahantab "
-                    "instance appears "
-                    "to be running."
-                )
-
-            return False
-
-        with open(
-            LOCK_FILE,
-            "w",
-            encoding="utf-8",
-        ) as file:
-
-            file.write(
-                str(os.getpid())
-            )
-
-        return True
-
-    except Exception as exc:
-
-        print(
-            f"Lock creation failed: {exc}"
-        )
-
-        return False
-
-
-def release_lock():
-
-    try:
-
-        if os.path.exists(
-            LOCK_FILE
-        ):
-
-            os.remove(
-                LOCK_FILE
-            )
-
-    except Exception as exc:
-
-        print(
-            f"Lock release failed: {exc}"
-        )
-
-
-# ============================================================
-# SENT STATE
-# ============================================================
-
-def load_sent_links():
-
-    if not os.path.exists(
-        STATE_FILE
-    ):
+    if not os.path.exists(path):
         return set()
 
     try:
 
         with open(
-            STATE_FILE,
+            path,
             "r",
             encoding="utf-8",
         ) as file:
@@ -860,82 +804,64 @@ def load_sent_links():
                 if line.strip()
             }
 
-    except Exception:
+    except Exception as exc:
+
+        print(
+            f"State read error: {exc}"
+        )
 
         return set()
 
 
-def save_sent_link(link):
+def load_sent_links():
 
-    try:
-
-        with open(
-            STATE_FILE,
-            "a",
-            encoding="utf-8",
-        ) as file:
-
-            file.write(
-                link + "\n"
-            )
-
-    except Exception as exc:
-
-        print(
-            f"Could not save link: {exc}"
-        )
+    return load_state_file(
+        STATE_FILE
+    )
 
 
 def load_sent_titles():
 
-    if not os.path.exists(
+    return load_state_file(
         TITLE_STATE_FILE
-    ):
-        return set()
+    )
+
+
+def save_state(path, value):
 
     try:
 
         with open(
-            TITLE_STATE_FILE,
-            "r",
-            encoding="utf-8",
-        ) as file:
-
-            return {
-                line.strip()
-                for line in file
-                if line.strip()
-            }
-
-    except Exception:
-
-        return set()
-
-
-def save_sent_title(title):
-
-    key = title_key(title)
-
-    if not key:
-        return
-
-    try:
-
-        with open(
-            TITLE_STATE_FILE,
+            path,
             "a",
             encoding="utf-8",
         ) as file:
 
             file.write(
-                key + "\n"
+                value + "\n"
             )
 
     except Exception as exc:
 
         print(
-            f"Could not save title: {exc}"
+            f"State save error: {exc}"
         )
+
+
+def save_sent_link(link):
+
+    save_state(
+        STATE_FILE,
+        link,
+    )
+
+
+def save_sent_title(title):
+
+    save_state(
+        TITLE_STATE_FILE,
+        title_hash(title),
+    )
 
 
 # ============================================================
@@ -946,18 +872,14 @@ def parse_date(entry):
 
     try:
 
-        import calendar
-
         if getattr(
             entry,
             "published_parsed",
             None,
         ):
 
-            timestamp = (
-                calendar.timegm(
-                    entry.published_parsed
-                )
+            timestamp = calendar.timegm(
+                entry.published_parsed
             )
 
             return datetime.fromtimestamp(
@@ -971,10 +893,8 @@ def parse_date(entry):
             None,
         ):
 
-            timestamp = (
-                calendar.timegm(
-                    entry.updated_parsed
-                )
+            timestamp = calendar.timegm(
+                entry.updated_parsed
             )
 
             return datetime.fromtimestamp(
@@ -985,9 +905,9 @@ def parse_date(entry):
     except Exception:
         pass
 
-    return datetime.now(
-        timezone.utc
-    )
+    # اگر تاریخ قابل تشخیص نباشد،
+    # خبر جدید فرض نمی‌شود.
+    return None
 
 
 # ============================================================
@@ -1008,13 +928,10 @@ def make_summary(entry):
             entry.summary
         )
 
-    if (
-        not text
-        and getattr(
-            entry,
-            "description",
-            None,
-        )
+    if not text and getattr(
+        entry,
+        "description",
+        None,
     ):
 
         text = clean_text(
@@ -1030,10 +947,10 @@ def make_summary(entry):
         text,
     )
 
-    if len(text) > 500:
+    if len(text) > 600:
 
         text = (
-            text[:497]
+            text[:597]
             .rsplit(" ", 1)[0]
             + "..."
         )
@@ -1068,24 +985,109 @@ def count_terms(
     )
 
 
-def has_other_province_in_title(
-    title,
-):
+# ============================================================
+# OTHER PROVINCE DETECTION
+# ============================================================
 
-    title = normalize_persian_text(
-        title
-    )
+def other_province_in_title(title):
+
+    title = normalize_persian(title)
 
     for province in OTHER_PROVINCE_TERMS:
 
-        if province in title:
+        if normalize_persian(province) in title:
+            return True
+
+    return False
+
+
+def other_province_in_text(text):
+
+    text = normalize_persian(text)
+
+    for province in OTHER_PROVINCE_TERMS:
+
+        if normalize_persian(province) in text:
             return True
 
     return False
 
 
 # ============================================================
-# LOCAL SCORE
+# FOREIGN DETECTION
+# ============================================================
+
+def foreign_location_in_title(title):
+
+    title = normalize_persian(title)
+
+    for term in FOREIGN_LOCATION_TERMS:
+
+        if normalize_persian(term) in title:
+            return True
+
+    return False
+
+
+# ============================================================
+# LOCAL EVIDENCE
+# ============================================================
+
+def get_local_evidence(
+    title,
+    summary,
+):
+
+    title_n = normalize_persian(title)
+    summary_n = normalize_persian(summary)
+
+    full = (
+        title_n
+        + " "
+        + summary_n
+    )
+
+    province_hits = [
+        term
+        for term in PROVINCE_TERMS
+        if normalize_persian(term) in full
+    ]
+
+    city_hits = [
+        term
+        for term in CITY_TERMS
+        if normalize_persian(term) in full
+    ]
+
+    geography_hits = [
+        term
+        for term in LOCAL_GEOGRAPHY_TERMS
+        if normalize_persian(term) in full
+    ]
+
+    culture_hits = [
+        term
+        for term in LOCAL_CULTURE_TERMS
+        if normalize_persian(term) in full
+    ]
+
+    subject_hits = [
+        term
+        for term in LOCAL_SUBJECT_TERMS
+        if normalize_persian(term) in full
+    ]
+
+    return {
+        "province": province_hits,
+        "city": city_hits,
+        "geography": geography_hits,
+        "culture": culture_hits,
+        "subject": subject_hits,
+    }
+
+
+# ============================================================
+# STRICT LOCAL FILTER
 # ============================================================
 
 def local_score(
@@ -1093,351 +1095,353 @@ def local_score(
     summary,
 ):
 
-    title = normalize_persian_text(
-        title
-    )
+    title_n = normalize_persian(title)
+    summary_n = normalize_persian(summary)
 
-    summary = normalize_persian_text(
-        summary
-    )
-
-    full_text = (
-        title
+    full = (
+        title_n
         + " "
-        + summary
+        + summary_n
+    )
+
+    evidence = get_local_evidence(
+        title,
+        summary,
     )
 
     score = 0
 
     # --------------------------------------------------------
-    # OTHER PROVINCE IN TITLE
+    # DIRECT PROVINCE
     # --------------------------------------------------------
 
-    if has_other_province_in_title(
-        title
-    ):
+    if evidence["province"]:
+        score += 50
 
-        score -= 150
-
-    # --------------------------------------------------------
-    # PROVINCE
-    # --------------------------------------------------------
-
-    for term in PROVINCE_TERMS:
-
-        if term in title:
-            score += 35
-
-        elif term in summary:
-            score += 12
+        if any(
+            normalize_persian(term)
+            in title_n
+            for term in PROVINCE_TERMS
+        ):
+            score += 30
 
     # --------------------------------------------------------
     # CITY
     # --------------------------------------------------------
 
-    city_in_title = False
+    city_title_hits = [
+        term
+        for term in CITY_TERMS
+        if normalize_persian(term)
+        in title_n
+    ]
 
-    for term in CITY_TERMS:
+    if city_title_hits:
+        score += 25
 
-        if term in title:
-
-            score += 10
-
-            city_in_title = True
-
-        elif term in summary:
-
-            score += 4
-
-    # --------------------------------------------------------
-    # GEOGRAPHICAL AREAS
-    # --------------------------------------------------------
-
-    for term in GEOGRAPHICAL_TERMS:
-
-        if term in title:
-
-            score += 25
-
-        elif term in summary:
-
-            score += 10
+    elif evidence["city"]:
+        score += 12
 
     # --------------------------------------------------------
-    # CULTURE / ART
+    # SPECIAL GEOGRAPHY
     # --------------------------------------------------------
 
-    culture_count = count_terms(
-        full_text,
-        CULTURE_TERMS,
-    )
+    if evidence["geography"]:
 
-    if culture_count:
+        score += 35
+
+        if any(
+            normalize_persian(term)
+            in title_n
+            for term in LOCAL_GEOGRAPHY_TERMS
+        ):
+            score += 15
+
+    # --------------------------------------------------------
+    # CULTURE / ART / MUSIC
+    # --------------------------------------------------------
+
+    if evidence["culture"]:
+
+        score += 35
+
+        # اگر همزمان مکان محلی هم وجود داشته باشد
+        if (
+            evidence["province"]
+            or evidence["city"]
+            or evidence["geography"]
+        ):
+            score += 20
+
+    # --------------------------------------------------------
+    # LOCAL SUBJECT
+    # --------------------------------------------------------
+
+    if evidence["subject"]:
 
         score += min(
-            culture_count * 10,
-            30,
+            len(evidence["subject"]) * 5,
+            25,
         )
 
     # --------------------------------------------------------
-    # LOCAL CONTEXT
+    # OTHER PROVINCE
     # --------------------------------------------------------
 
-    context_count = count_terms(
-        full_text,
-        LOCAL_CONTEXT_TERMS,
-    )
-
-    score += min(
-        context_count * 5,
-        30,
-    )
+    if other_province_in_title(title):
+        score -= 100
 
     # --------------------------------------------------------
-    # CULTURAL CONTEXT
+    # FOREIGN TITLE
     # --------------------------------------------------------
 
-    cultural_context_count = count_terms(
-        full_text,
-        LOCAL_CULTURAL_CONTEXT,
-    )
+    if foreign_location_in_title(title):
 
-    score += min(
-        cultural_context_count * 6,
-        24,
-    )
+        # فقط در صورتی اجازه بده که خود عنوان
+        # ارتباط روشن با سیستان و بلوچستان داشته باشد.
+        if not (
+            contains_any(
+                title_n,
+                [
+                    "سیستان",
+                    "بلوچستان",
+                    "چابهار",
+                    "مکران",
+                    "هیرمند",
+                    "هامون",
+                    "جازموریان",
+                ],
+            )
+        ):
+            score -= 100
 
     # --------------------------------------------------------
-    # NATIONAL SPORTS / UNRELATED
+    # GENERIC UNRELATED TOPICS
     # --------------------------------------------------------
 
-    for term in LOCAL_EXCLUDE_TERMS:
+    for term in UNRELATED_TERMS:
 
-        if term in full_text:
-            score -= 70
-
-    # --------------------------------------------------------
-    # CITY WITHOUT LOCAL CONTEXT
-    # --------------------------------------------------------
-
-    if (
-        city_in_title
-        and context_count == 0
-        and cultural_context_count == 0
-    ):
-
-        score -= 30
+        if normalize_persian(term) in full:
+            score -= 80
 
     return score
 
-
-# ============================================================
-# REAL LOCAL NEWS
-# ============================================================
 
 def is_real_local_news(
     title,
     summary,
 ):
 
-    title = normalize_persian_text(
-        title
-    )
+    title_n = normalize_persian(title)
+    summary_n = normalize_persian(summary)
 
-    summary = normalize_persian_text(
-        summary
-    )
-
-    full_text = (
-        title
+    full = (
+        title_n
         + " "
-        + summary
+        + summary_n
     )
 
-    # --------------------------------------------------------
-    # OTHER PROVINCE IN TITLE
-    # --------------------------------------------------------
+    evidence = get_local_evidence(
+        title,
+        summary,
+    )
 
-    if has_other_province_in_title(
-        title
-    ):
+    # ========================================================
+    # HARD REJECT: OTHER PROVINCE IN TITLE
+    # ========================================================
 
+    if other_province_in_title(title):
         return False
 
-    # --------------------------------------------------------
-    # UNRELATED TOPICS
-    # --------------------------------------------------------
+    # ========================================================
+    # HARD REJECT: GENERIC NATIONAL SPORTS ETC.
+    # ========================================================
 
-    for term in LOCAL_EXCLUDE_TERMS:
+    for term in UNRELATED_TERMS:
 
-        if term in full_text:
-
+        if normalize_persian(term) in full:
             return False
 
-    # --------------------------------------------------------
-    # LOCATION
-    # --------------------------------------------------------
+    # ========================================================
+    # HARD REJECT: FOREIGN ARTICLE
+    # ========================================================
 
-    has_province = contains_any(
-        full_text,
-        PROVINCE_TERMS,
+    if foreign_location_in_title(title):
+
+        # فقط اگر ارتباط مستقیم و واضح با استان باشد
+        local_anchor = (
+            evidence["province"]
+            or evidence["geography"]
+            or any(
+                normalize_persian(x)
+                in title_n
+                for x in [
+                    "بلوچستان",
+                    "سیستان",
+                    "چابهار",
+                    "مکران",
+                    "هیرمند",
+                    "هامون",
+                    "جازموریان",
+                ]
+            )
+        )
+
+        if not local_anchor:
+            return False
+
+    # ========================================================
+    # MUST HAVE STRONG LOCAL ANCHOR
+    # ========================================================
+
+    has_province = bool(
+        evidence["province"]
     )
 
-    has_city = contains_any(
-        full_text,
-        CITY_TERMS,
+    has_city = bool(
+        evidence["city"]
     )
 
-    has_geography = contains_any(
-        full_text,
-        GEOGRAPHICAL_TERMS,
+    has_geography = bool(
+        evidence["geography"]
     )
 
-    has_culture = contains_any(
-        full_text,
-        CULTURE_TERMS,
+    has_culture = bool(
+        evidence["culture"]
     )
 
-    # --------------------------------------------------------
-    # NO LOCAL EVIDENCE
-    # --------------------------------------------------------
-
-    if not (
-        has_province
-        or has_city
-        or has_geography
-        or has_culture
-    ):
-
-        return False
-
-    # --------------------------------------------------------
-    # CULTURAL NEWS
-    # --------------------------------------------------------
+    # ========================================================
+    # CULTURE / MUSIC / ART
+    # ========================================================
 
     if has_culture:
 
-        # فرهنگ/هنر فقط وقتی پذیرفته شود
-        # که نشانه‌ای از استان/شهر/منطقه داشته باشد.
-
+        # فرهنگ و هنر باید همراه با نشانه محلی باشد.
         if (
             has_province
             or has_city
             or has_geography
         ):
+            return True
 
+        return False
+
+    # ========================================================
+    # HAMUN / HIRMAND / JAZMURIAN / MAKRAN / OMAN
+    # ========================================================
+
+    if has_geography:
+
+        # این موارد ذاتاً محلی هستند،
+        # اما خبر باید درباره خود موضوع باشد.
+        return True
+
+    # ========================================================
+    # PROVINCE EXPLICIT
+    # ========================================================
+
+    if has_province:
+
+        score = local_score(
+            title,
+            summary,
+        )
+
+        return score >= 50
+
+    # ========================================================
+    # CITY ONLY
+    # ========================================================
+
+    if has_city:
+
+        # نام شهر به تنهایی کافی نیست.
+        subject_count = count_terms(
+            full,
+            LOCAL_SUBJECT_TERMS,
+        )
+
+        culture_count = count_terms(
+            full,
+            LOCAL_CULTURE_TERMS,
+        )
+
+        if (
+            subject_count >= 1
+            or culture_count >= 1
+        ):
             return (
                 local_score(
                     title,
                     summary,
                 )
-                >= 15
+                >= 30
             )
 
-    # --------------------------------------------------------
-    # GEOGRAPHICAL NEWS
-    # --------------------------------------------------------
+        return False
 
-    if has_geography:
-
-        return (
-            local_score(
-                title,
-                summary,
-            )
-            >= 15
-        )
-
-    # --------------------------------------------------------
-    # PROVINCE IN TITLE
-    # --------------------------------------------------------
-
-    if contains_any(
-        title,
-        PROVINCE_TERMS,
-    ):
-
-        return (
-            local_score(
-                title,
-                summary,
-            )
-            >= 25
-        )
-
-    # --------------------------------------------------------
-    # CITY ALONE IS NOT ENOUGH
-    # --------------------------------------------------------
-
-    context_count = count_terms(
-        full_text,
-        LOCAL_CONTEXT_TERMS,
-    )
-
-    cultural_context_count = count_terms(
-        full_text,
-        LOCAL_CULTURAL_CONTEXT,
-    )
-
-    if has_city:
-
-        if (
-            context_count < 1
-            and cultural_context_count < 1
-        ):
-
-            return False
-
-    # --------------------------------------------------------
-    # FINAL SCORE
-    # --------------------------------------------------------
-
-    return (
-        local_score(
-            title,
-            summary,
-        )
-        >= 15
-    )
+    return False
 
 
 # ============================================================
-# NATIONAL NEWS
+# ARTICLE DUPLICATION
 # ============================================================
 
-def national_score(
-    title,
-    summary,
-):
+def token_set(text):
 
-    text = (
-        normalize_persian_text(title)
-        + " "
-        + normalize_persian_text(summary)
+    normalized = normalize_persian(text)
+
+    return set(
+        word
+        for word in normalized.split()
+        if len(word) > 2
     )
 
-    score = 0
 
-    for term in MAJOR_NATIONAL_TERMS:
-
-        if term in text:
-            score += 10
-
-    return score
-
-
-def is_exceptional_national_news(
-    title,
-    summary,
+def title_similarity(
+    title_a,
+    title_b,
 ):
 
-    return (
-        national_score(
-            title,
-            summary,
-        )
-        >= 10
+    a = token_set(title_a)
+    b = token_set(title_b)
+
+    if not a or not b:
+        return 0.0
+
+    intersection = len(
+        a.intersection(b)
     )
+
+    union = len(
+        a.union(b)
+    )
+
+    if union == 0:
+        return 0.0
+
+    return intersection / union
+
+
+def is_duplicate_title(
+    title,
+    sent_titles,
+):
+
+    current = token_set(title)
+
+    if not current:
+        return False
+
+    for stored_hash in sent_titles:
+
+        # hash به تنهایی امکان similarity ندارد.
+        # similarity با عنوان‌های همین اجرای فعلی
+        # پایین‌تر انجام می‌شود.
+        if title_hash(title) == stored_hash:
+            return True
+
+    return False
 
 
 # ============================================================
@@ -1497,7 +1501,7 @@ def collect_source(
 
         for entry in feed.entries:
 
-            title = normalize_persian_text(
+            title = clean_text(
                 getattr(
                     entry,
                     "title",
@@ -1526,22 +1530,22 @@ def collect_source(
                 entry
             )
 
+            # خبر بدون تاریخ قابل اعتماد
+            # وارد صف انتشار نمی‌شود.
+            if published is None:
+                continue
+
             summary = make_summary(
                 entry
             )
 
             items.append({
-
                 "title": title,
-
                 "summary": summary,
-
                 "link": link,
-
                 "published": published,
-
                 "source": source_name,
-
+                "source_domain": source_domain,
             })
 
     return items
@@ -1587,90 +1591,25 @@ def collect_all_news():
             collected.append(item)
 
     # --------------------------------------------------------
-    # URL DEDUPLICATION
+    # URL DEDUP
     # --------------------------------------------------------
 
-    unique_by_url = {}
+    unique = {}
 
     for item in collected:
 
         link = item["link"]
 
-        if link not in unique_by_url:
-
-            unique_by_url[
-                link
-            ] = item
+        if link not in unique:
+            unique[link] = item
 
     return list(
-        unique_by_url.values()
+        unique.values()
     )
 
 
 # ============================================================
-# REMOVE SIMILAR NEWS
-# ============================================================
-
-def are_titles_similar(
-    title_a,
-    title_b,
-):
-
-    a = normalize_persian_text(
-        title_a
-    )
-
-    b = normalize_persian_text(
-        title_b
-    )
-
-    if a == b:
-        return True
-
-    # کلمات مهم
-    words_a = {
-        w
-        for w in re.findall(
-            r"[\u0600-\u06FF]+",
-            a,
-        )
-        if len(w) >= 3
-    }
-
-    words_b = {
-        w
-        for w in re.findall(
-            r"[\u0600-\u06FF]+",
-            b,
-        )
-        if len(w) >= 3
-    }
-
-    if not words_a or not words_b:
-        return False
-
-    intersection = (
-        words_a & words_b
-    )
-
-    smaller = min(
-        len(words_a),
-        len(words_b),
-    )
-
-    if smaller == 0:
-        return False
-
-    similarity = (
-        len(intersection)
-        / smaller
-    )
-
-    return similarity >= 0.70
-
-
-# ============================================================
-# SELECT LOCAL NEWS
+# SELECT ONE LOCAL NEWS
 # ============================================================
 
 def select_local_news(
@@ -1681,121 +1620,85 @@ def select_local_news(
 
     candidates = []
 
+    # عنوان‌هایی که در همین اجرای فعلی دیده‌ایم
+    current_titles = []
+
     for item in news:
 
-        if item["link"] in sent_links:
+        link = item["link"]
+        title = item["title"]
+
+        # ----------------------------------------------------
+        # URL DUPLICATE
+        # ----------------------------------------------------
+
+        if link in sent_links:
             continue
 
-        key = title_key(
-            item["title"]
-        )
+        # ----------------------------------------------------
+        # HASH DUPLICATE
+        # ----------------------------------------------------
 
-        if key in sent_titles:
+        if is_duplicate_title(
+            title,
+            sent_titles,
+        ):
             continue
+
+        # ----------------------------------------------------
+        # LOCAL FILTER
+        # ----------------------------------------------------
 
         if not is_real_local_news(
-            item["title"],
+            title,
             item["summary"],
         ):
-
             continue
 
-        score = local_score(
-            item["title"],
-            item["summary"],
-        )
+        # ----------------------------------------------------
+        # SIMILARITY WITH ALREADY SENT TITLES
+        # We only have hashes persisted, so exact hash
+        # is checked here. Similarity is also applied
+        # between candidates from different sources.
+        # ----------------------------------------------------
 
-        item = dict(item)
+        duplicate_candidate = False
 
-        item["score"] = score
+        for previous_title in current_titles:
 
-        candidates.append(item)
+            similarity = title_similarity(
+                title,
+                previous_title,
+            )
 
-    candidates.sort(
-        key=lambda x: (
-            x["score"],
-            x["published"],
-        ),
-        reverse=True,
-    )
+            if similarity >= 0.72:
 
-    selected = []
-
-    for item in candidates:
-
-        duplicate = False
-
-        for existing in selected:
-
-            if are_titles_similar(
-                item["title"],
-                existing["title"],
-            ):
-
-                duplicate = True
+                duplicate_candidate = True
                 break
 
-        if duplicate:
+        if duplicate_candidate:
             continue
 
-        selected.append(item)
-
-        if (
-            len(selected)
-            >= MAX_NEWS_PER_RUN
-        ):
-
-            break
-
-    return selected
-
-
-# ============================================================
-# SELECT NATIONAL
-# ============================================================
-
-def select_national_news(
-    news,
-    sent_links,
-    sent_titles,
-):
-
-    candidates = []
-
-    for item in news:
-
-        if item["link"] in sent_links:
-            continue
-
-        key = title_key(
-            item["title"]
+        current_titles.append(
+            title
         )
 
-        if key in sent_titles:
-            continue
-
-        if is_real_local_news(
-            item["title"],
-            item["summary"],
-        ):
-
-            continue
-
-        if not is_exceptional_national_news(
-            item["title"],
-            item["summary"],
-        ):
-
-            continue
-
-        item = dict(item)
-
-        item["score"] = national_score(
-            item["title"],
+        score = local_score(
+            title,
             item["summary"],
         )
 
-        candidates.append(item)
+        candidate = dict(item)
+
+        candidate["score"] = score
+
+        candidates.append(
+            candidate
+        )
+
+    # --------------------------------------------------------
+    # NEWEST + STRONGEST
+    # --------------------------------------------------------
 
     candidates.sort(
         key=lambda x: (
@@ -1921,7 +1824,7 @@ def bale_request(
 
 
 # ============================================================
-# SOCIAL LINKS
+# CHANNEL LINKS
 # ============================================================
 
 TELEGRAM_URL = (
@@ -2052,11 +1955,9 @@ def send_photo(
 
         response.raise_for_status()
 
-        content_type = (
-            response.headers.get(
-                "Content-Type",
-                "",
-            )
+        content_type = response.headers.get(
+            "Content-Type",
+            "",
         )
 
         if not content_type.startswith(
@@ -2076,13 +1977,11 @@ def send_photo(
             extension = ".webp"
 
         files = {
-
             "photo": (
                 f"news{extension}",
                 response.content,
                 content_type,
             )
-
         }
 
         reply_markup = build_reply_markup(
@@ -2093,6 +1992,7 @@ def send_photo(
             item
         )
 
+        # محدودیت کپشن بله
         caption = caption[:1000]
 
         return bale_request(
@@ -2136,17 +2036,147 @@ def publish_item(item):
 
 
 # ============================================================
-# PROCESS ONE RUN
+# PUBLISH ONE NEWS
 # ============================================================
 
-def process_once():
+def publish_one_news():
 
+    print()
     print(
-        "==================================="
+        "-----------------------------------"
     )
 
     print(
-        "🌐 JAHANTAB"
+        "Scanning approved Iranian sources..."
+    )
+
+    sent_links = load_sent_links()
+    sent_titles = load_sent_titles()
+
+    all_news = collect_all_news()
+
+    print(
+        f"Collected fresh news: "
+        f"{len(all_news)}"
+    )
+
+    # --------------------------------------------------------
+    # SELECT ONLY ONE
+    # --------------------------------------------------------
+
+    selected = select_local_news(
+        all_news,
+        sent_links,
+        sent_titles,
+    )
+
+    if not selected:
+
+        print(
+            "No suitable new local news found."
+        )
+
+        print(
+            "Nothing published this cycle."
+        )
+
+        print(
+            "-----------------------------------"
+        )
+
+        return False
+
+    selected["category"] = (
+        "استان سیستان و بلوچستان"
+    )
+
+    print(
+        "SELECTED:"
+    )
+
+    print(
+        f"[{selected['source']}] "
+        f"{selected['title']}"
+    )
+
+    print(
+        f"Score: "
+        f"{selected['score']}"
+    )
+
+    # --------------------------------------------------------
+    # PUBLISH
+    # --------------------------------------------------------
+
+    try:
+
+        publish_item(
+            selected
+        )
+
+        # ----------------------------------------------------
+        # VERY IMPORTANT:
+        # Only after successful Bale publication,
+        # save URL + title fingerprint.
+        # ----------------------------------------------------
+
+        save_sent_link(
+            selected["link"]
+        )
+
+        save_sent_title(
+            selected["title"]
+        )
+
+        print(
+            "Published successfully."
+        )
+
+        print(
+            "Saved to anti-duplicate state."
+        )
+
+        print(
+            "-----------------------------------"
+        )
+
+        return True
+
+    except Exception as exc:
+
+        print(
+            f"Publish failed: {exc}"
+        )
+
+        print(
+            "IMPORTANT: "
+            "News was NOT saved as sent."
+        )
+
+        print(
+            "-----------------------------------"
+        )
+
+        return False
+
+
+# ============================================================
+# MAIN LOOP
+# ============================================================
+
+def main():
+
+    print()
+    print(
+        "=========================================="
+    )
+
+    print(
+        "        JAHANTAB NEWS BOT v6.0"
+    )
+
+    print(
+        "        جهان‌تاب"
     )
 
     print(
@@ -2154,253 +2184,90 @@ def process_once():
     )
 
     print(
-        "==================================="
-    )
-
-    sent_links = load_sent_links()
-
-    sent_titles = load_sent_titles()
-
-    print(
-        "Previously sent links: "
-        f"{len(sent_links)}"
+        "=========================================="
     )
 
     print(
-        "Previously sent titles: "
-        f"{len(sent_titles)}"
-    )
-
-    all_news = collect_all_news()
-
-    print(
-        "Approved-source news: "
-        f"{len(all_news)}"
-    )
-
-    # --------------------------------------------------------
-    # LOCAL
-    # --------------------------------------------------------
-
-    local_news = select_local_news(
-        all_news,
-        sent_links,
-        sent_titles,
+        "Mode: ONE NEWS EVERY 30 MINUTES"
     )
 
     print(
-        "Selected local news: "
-        f"{len(local_news)}"
+        "Local focus: Sistan & Baluchestan"
+    )
+
+    print(
+        "Sources: Approved Iranian news sources"
+    )
+
+    print(
+        "=========================================="
     )
 
     # --------------------------------------------------------
-    # PUBLISH LOCAL
+    # FIRST RUN
     # --------------------------------------------------------
 
-    for item in local_news:
+    publish_one_news()
 
-        item["category"] = (
-            "استان سیستان و بلوچستان"
+    # --------------------------------------------------------
+    # CONTINUOUS 30-MINUTE LOOP
+    # --------------------------------------------------------
+
+    while True:
+
+        next_time = (
+            datetime.now()
+            + timedelta(
+                seconds=PUBLISH_INTERVAL
+            )
+        )
+
+        print()
+        print(
+            "Next scan at: "
+            + next_time.strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
         )
 
         print(
-            "Publishing local: "
-            f"[{item['source']}] "
-            f"{item['title']}"
+            "Waiting 30 minutes..."
         )
 
         try:
-
-            # ثبت در حافظه قبل از ارسال
-            # برای جلوگیری از انتخاب مجدد
-            sent_links.add(
-                item["link"]
-            )
-
-            sent_titles.add(
-                title_key(
-                    item["title"]
-                )
-            )
-
-            publish_item(item)
-
-            save_sent_link(
-                item["link"]
-            )
-
-            save_sent_title(
-                item["title"]
-            )
-
-            print(
-                "✅ Published successfully."
-            )
-
-            # در هر اجرا فقط یک خبر
-            return True
-
-        except Exception as exc:
-
-            # اگر ارسال شکست خورد،
-            # اجازه می‌دهیم اجرای بعدی دوباره امتحان کند.
-
-            sent_links.discard(
-                item["link"]
-            )
-
-            sent_titles.discard(
-                title_key(
-                    item["title"]
-                )
-            )
-
-            print(
-                f"❌ Publish failed: "
-                f"{exc}"
-            )
-
-    # --------------------------------------------------------
-    # EXCEPTIONAL NATIONAL
-    # --------------------------------------------------------
-
-    national = select_national_news(
-        all_news,
-        sent_links,
-        sent_titles,
-    )
-
-    if national:
-
-        national["category"] = (
-            "ایران"
-        )
-
-        print(
-            "Publishing exceptional "
-            "national: "
-            f"[{national['source']}] "
-            f"{national['title']}"
-        )
-
-        try:
-
-            sent_links.add(
-                national["link"]
-            )
-
-            sent_titles.add(
-                title_key(
-                    national["title"]
-                )
-            )
-
-            publish_item(
-                national
-            )
-
-            save_sent_link(
-                national["link"]
-            )
-
-            save_sent_title(
-                national["title"]
-            )
-
-            print(
-                "✅ National news published."
-            )
-
-            return True
-
-        except Exception as exc:
-
-            print(
-                f"❌ National publish failed: "
-                f"{exc}"
-            )
-
-    print(
-        "No suitable new news found."
-    )
-
-    return False
-
-
-# ============================================================
-# MAIN LOOP
-# EVERY 30 MINUTES
-# ============================================================
-
-def main():
-
-    if not acquire_lock():
-
-        print(
-            "Jahantab is already running."
-        )
-
-        return
-
-    try:
-
-        print(
-            "==================================="
-        )
-
-        print(
-            "🌐 JAHANTAB BOT STARTED"
-        )
-
-        print(
-            "⏱ Interval: 30 minutes"
-        )
-
-        print(
-            "📍 Sistan & Baluchestan"
-        )
-
-        print(
-            "==================================="
-        )
-
-        while True:
-
-            try:
-
-                process_once()
-
-            except Exception as exc:
-
-                print(
-                    "❌ Main cycle error:"
-                )
-
-                print(exc)
-
-            print(
-                "-----------------------------------"
-            )
-
-            print(
-                "⏳ Waiting 30 minutes..."
-            )
-
-            print(
-                "-----------------------------------"
-            )
 
             time.sleep(
-                RUN_INTERVAL_SECONDS
+                PUBLISH_INTERVAL
             )
 
-    finally:
+        except KeyboardInterrupt:
 
-        release_lock()
+            print()
+            print(
+                "Bot stopped by user."
+            )
 
-        print(
-            "Jahantab lock released."
-        )
+            break
+
+        # ----------------------------------------------------
+        # NEXT CYCLE
+        # ----------------------------------------------------
+
+        try:
+
+            publish_one_news()
+
+        except Exception as exc:
+
+            print(
+                "Cycle error:"
+            )
+
+            print(exc)
+
+            print(
+                "Bot will continue."
+            )
 
 
 # ============================================================
@@ -2408,5 +2275,4 @@ def main():
 # ============================================================
 
 if __name__ == "__main__":
-
     main()
