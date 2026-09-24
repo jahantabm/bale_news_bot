@@ -3,26 +3,67 @@
 ============================================================
 JAHANTAB | جهان‌تاب
 رصدخانه خبری سیستان و بلوچستان
-نسخه نهایی v8.0
+نسخه نهایی v9.0
 ============================================================
 
-ویژگی‌ها:
-- RSS چند منبع خبری
-- فیلتر سخت‌گیرانه سیستان و بلوچستان
-- تشخیص استان‌های دیگر در عنوان
-- تشخیص موقعیت خارجی در عنوان
-- جلوگیری از خبرهای ملی/عمومی با اشاره گذرا به استان
-- Word Boundary
-- ZWNJ → space
-- حذف خبرهای تکراری cross-run
-- SequenceMatcher + Jaccard
+ARCHITECTURE
+------------------------------------------------------------
+RSS
+ ↓
+Geographic Filter
+ ↓
+Irrelevant-News Filter
+ ↓
+Duplicate-Link Filter
+ ↓
+Event Similarity
+ ↓
+Event Clustering
+ ↓
+Best Version Selection
+ ↓
+Local Scoring
+ ↓
+Freshness Scoring
+ ↓
+Publish
+
+ویژگی‌های اصلی v9.0:
+
+- فقط منابع داخلی و رسمی/شناخته‌شده ایرانی
+- تمرکز سخت‌گیرانه بر سیستان و بلوچستان
+- حذف لینک تکراری
+- حذف عنوان تکراری
+- تشخیص رویدادهای یکسان از چند خبرگزاری
+- گروه‌بندی خبرهای مربوط به یک رویداد
+- انتخاب بهترین نسخه خبر
+- جلوگیری از انتشار مجدد همان رویداد در اجراهای بعدی
+- Event Similarity چندمعیاره
+
+وزن تشخیص تکراری بودن رویداد:
+
+    عنوان             25%
+    خلاصه             35%
+    واژه‌های متمایز   25%
+    شباهت کاراکتری    15%
+
+- امتیاز خیلی بالا → تکراری قطعی
+- امتیاز متوسط → بررسی تکمیلی
+- امتیاز پایین → رویداد جدید
+
+- RSS date
+- email.utils fallback
+- freshness scoring
+- SequenceMatcher
+- Jaccard
+- distinctive-word similarity
 - PID-safe lock
-- Prune خودکار state
-- تاریخ RSS + fallback email.utils
-- امتیازدهی بر اساس ارتباط + تازگی
-- لاگ علت رد خبر
-- ارسال عکس در صورت وجود
-- fallback به sendMessage
+- state persistence
+- automatic pruning
+- OG image
+- sendPhoto fallback
+- sendMessage fallback
+- لاگ کامل علت رد/ادغام خبر
 ============================================================
 """
 
@@ -35,6 +76,7 @@ import calendar
 import email.utils
 import logging
 import difflib
+import hashlib
 
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse
@@ -57,6 +99,10 @@ CHAT_ID = os.getenv("BALE_CHAT_ID")
 STATE_FILE = "sent_links.txt"
 TITLES_FILE = "sent_titles.txt"
 PUBLISHED_STATE_FILE = "published_state.json"
+
+# state مربوط به رویدادها
+EVENTS_FILE = "published_events.json"
+
 LOCK_FILE = "jahantab.lock"
 
 PUBLISH_INTERVAL_MINUTES = 30
@@ -64,30 +110,63 @@ PUBLISH_INTERVAL_MINUTES = 30
 # فقط خبرهای حداکثر 24 ساعت گذشته
 MAX_NEWS_AGE_HOURS = 24
 
-# حداکثر تعداد خبرهای بررسی‌شده
 MAX_CANDIDATES = 1000
 
-# محدودیت متن
 MAX_CAPTION_LEN = 1000
 MAX_TEXT_LEN = 3900
 
-# تعداد عنوان‌های ذخیره‌شده
-MAX_TITLES_KEPT = 400
+MAX_TITLES_KEPT = 500
 
-# شباهت عنوان
-TITLE_DUP_THRESHOLD = 0.65
+# ------------------------------------------------------------
+# EVENT DUPLICATION
+# ------------------------------------------------------------
 
-# برای خبرهای صرفاً شهری، حداقل امتیاز
+# امتیاز کلی از 0 تا 100
+#
+# >= 82
+# رویداد تقریباً قطعی تکراری
+#
+# 68 تا 81
+# احتمالاً همان رویداد
+#
+# < 68
+# رویداد جدید
+#
+EVENT_DUPLICATE_THRESHOLD = 82
+EVENT_PROBABLE_THRESHOLD = 68
+
+# اگر یک خبر با رویداد ذخیره‌شده بیش از این فاصله داشته باشد
+# دیگر به‌صورت خودکار همان رویداد فرض نمی‌شود.
+EVENT_MAX_AGE_HOURS = 72
+
+# ------------------------------------------------------------
+# EVENT WEIGHTS
+# ------------------------------------------------------------
+
+TITLE_WEIGHT = 0.25
+SUMMARY_WEIGHT = 0.35
+DISTINCTIVE_WEIGHT = 0.25
+CHARACTER_WEIGHT = 0.15
+
+# ------------------------------------------------------------
+# FRESHNESS
+# ------------------------------------------------------------
+
+FRESHNESS_HOURS = 24
+
+# ------------------------------------------------------------
+# LOCAL MINIMUM SCORES
+# ------------------------------------------------------------
+
 MIN_CITY_SCORE = 25
-
-# برای خبرهای استانی
 MIN_PROVINCE_SCORE = 30
-
-# برای خبرهای خاص مثل هامون، مکران و...
 MIN_SPECIAL_SCORE = 28
 
-# حداکثر فاصله زمانی که در امتیاز تازگی اثر کامل دارد
-FRESHNESS_HOURS = 24
+# ------------------------------------------------------------
+# STATE LIMITS
+# ------------------------------------------------------------
+
+MAX_EVENTS_KEPT = 600
 
 
 TELEGRAM_URL = "https://t.me/jahantab_news"
@@ -119,6 +198,7 @@ if not CHAT_ID:
 # ============================================================
 
 def build_session():
+
     session = requests.Session()
 
     session.headers.update({
@@ -127,7 +207,7 @@ def build_session():
             "AppleWebKit/537.36 "
             "(KHTML, like Gecko) "
             "Chrome/120.0 Safari/537.36 "
-            "JahantabBot/8.0"
+            "JahantabBot/9.0"
         ),
         "Accept-Language": "fa-IR,fa;q=0.9,en;q=0.5",
     })
@@ -135,8 +215,17 @@ def build_session():
     retry = Retry(
         total=3,
         backoff_factor=0.8,
-        status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["GET", "POST"],
+        status_forcelist=[
+            429,
+            500,
+            502,
+            503,
+            504,
+        ],
+        allowed_methods=[
+            "GET",
+            "POST",
+        ],
         raise_on_status=False,
     )
 
@@ -146,8 +235,15 @@ def build_session():
         pool_maxsize=24,
     )
 
-    session.mount("http://", adapter)
-    session.mount("https://", adapter)
+    session.mount(
+        "http://",
+        adapter,
+    )
+
+    session.mount(
+        "https://",
+        adapter,
+    )
 
     return session
 
@@ -160,88 +256,112 @@ SESSION = build_session()
 # ============================================================
 
 SOURCES = [
+
     (
         "ایرنا",
         "irna.ir",
-        ["https://www.irna.ir/rss"],
+        [
+            "https://www.irna.ir/rss",
+        ],
     ),
+
     (
         "ایسنا",
         "isna.ir",
-        ["https://www.isna.ir/rss"],
+        [
+            "https://www.isna.ir/rss",
+        ],
     ),
+
     (
         "مهر",
         "mehrnews.com",
-        ["https://www.mehrnews.com/rss"],
+        [
+            "https://www.mehrnews.com/rss",
+        ],
     ),
+
     (
         "فارس",
         "farsnews.ir",
-        ["https://www.farsnews.ir/rss"],
+        [
+            "https://www.farsnews.ir/rss",
+        ],
     ),
+
     (
         "ایلنا",
         "ilna.ir",
-        ["https://www.ilna.ir/rss"],
+        [
+            "https://www.ilna.ir/rss",
+        ],
     ),
+
     (
         "تسنیم",
         "tasnimnews.com",
         [
-            "https://www.tasnimnews.com/fa/rss/feed/0/8/0/"
-            "مهمترین-اخبار-تسنیم"
+            (
+                "https://www.tasnimnews.com/fa/rss/feed/"
+                "0/8/0/مهمترین-اخبار-تسنیم"
+            ),
         ],
     ),
-    (
-        "تابناک",
-        "tabnak.ir",
-        ["https://www.tabnak.ir/fa/rss/allnews"],
-    ),
-    (
-        "عصر ایران",
-        "asriran.com",
-        ["https://www.asriran.com/fa/rss/allnews"],
-    ),
-    (
-        "فرارو",
-        "fararu.com",
-        ["https://fararu.com/fa/rss"],
-    ),
-    (
-        "جهان نیوز",
-        "jahannews.com",
-        ["https://www.jahannews.com/rss"],
-    ),
-    (
-        "خبرآنلاین",
-        "khabaronline.ir",
-        ["https://www.khabaronline.ir/rss"],
-    ),
-    (
-        "همشهری",
-        "hamshahrionline.ir",
-        ["https://www.hamshahrionline.ir/rss"],
-    ),
-    (
-        "جام جم",
-        "jamejamonline.ir",
-        ["https://jamejamonline.ir/rss"],
-    ),
-    (
-        "باشگاه خبرنگاران جوان",
-        "yjc.ir",
-        ["https://www.yjc.ir/fa/rss/allnews"],
-    ),
-    (
-        "انتخاب",
-        "entekhab.ir",
-        ["https://www.entekhab.ir/fa/rss"],
-    ),
+
     (
         "خبرگزاری صداوسیما",
         "iribnews.ir",
-        ["https://www.iribnews.ir/fa/rss"],
+        [
+            "https://www.iribnews.ir/fa/rss",
+        ],
+    ),
+
+    (
+        "باشگاه خبرنگاران جوان",
+        "yjc.ir",
+        [
+            "https://www.yjc.ir/fa/rss/allnews",
+        ],
+    ),
+
+    (
+        "تابناک",
+        "tabnak.ir",
+        [
+            "https://www.tabnak.ir/fa/rss/allnews",
+        ],
+    ),
+
+    (
+        "خبرآنلاین",
+        "khabaronline.ir",
+        [
+            "https://www.khabaronline.ir/rss",
+        ],
+    ),
+
+    (
+        "همشهری",
+        "hamshahrionline.ir",
+        [
+            "https://www.hamshahrionline.ir/rss",
+        ],
+    ),
+
+    (
+        "جام جم",
+        "jamejamonline.ir",
+        [
+            "https://jamejamonline.ir/rss",
+        ],
+    ),
+
+    (
+        "انتخاب",
+        "entekhab.ir",
+        [
+            "https://www.entekhab.ir/fa/rss",
+        ],
     ),
 ]
 
@@ -316,39 +436,26 @@ CITY_TERMS = [
 ]
 
 
-# ============================================================
-# SPECIAL LOCAL TERMS
-# ============================================================
-
 SPECIAL_LOCAL_TERMS = [
     "تالاب هامون",
     "تالاب بین المللی هامون",
-
     "رودخانه هیرمند",
     "رود هیرمند",
     "حقابه هیرمند",
     "حقابه ایران",
     "آب هیرمند",
-
     "جازموریان",
     "تالاب جازموریان",
-
     "مکران",
     "سواحل مکران",
     "ساحل مکران",
-
     "دریای عمان",
     "سواحل دریای عمان",
     "ساحل دریای عمان",
-
     "بندر چابهار",
     "منطقه آزاد چابهار",
 ]
 
-
-# ============================================================
-# CULTURE
-# ============================================================
 
 CULTURE_TERMS = [
     "فرهنگ سیستان و بلوچستان",
@@ -388,10 +495,6 @@ CULTURE_TERMS = [
     "شاعر بلوچ",
 ]
 
-
-# ============================================================
-# LOCAL CONTEXT
-# ============================================================
 
 LOCAL_CONTEXT_TERMS = [
     "استاندار",
@@ -440,7 +543,6 @@ LOCAL_CONTEXT_TERMS = [
     "توسعه",
     "اعتبار",
     "سرمایه گذاری",
-    "زیرساخت",
 
     "راه",
     "جاده",
@@ -479,10 +581,6 @@ LOCAL_CONTEXT_TERMS = [
 ]
 
 
-# ============================================================
-# OTHER PROVINCES
-# ============================================================
-
 OTHER_PROVINCE_TERMS = [
     "آذربایجان شرقی",
     "آذربایجان غربی",
@@ -517,10 +615,6 @@ OTHER_PROVINCE_TERMS = [
 ]
 
 
-# ============================================================
-# FOREIGN
-# ============================================================
-
 FOREIGN_LOCATION_TERMS = [
     "سوریه",
     "ترکیه",
@@ -539,7 +633,6 @@ FOREIGN_LOCATION_TERMS = [
     "تونس",
     "الجزایر",
     "مراکش",
-
     "آمریکا",
     "ایالات متحده",
     "انگلیس",
@@ -554,13 +647,11 @@ FOREIGN_LOCATION_TERMS = [
     "ژاپن",
     "کره جنوبی",
     "کره شمالی",
-
     "غزه",
     "کرانه باختری",
     "رام الله",
     "تل آویو",
     "قدس",
-
     "استانبول",
     "آنکارا",
     "دمشق",
@@ -574,16 +665,11 @@ FOREIGN_LOCATION_TERMS = [
 ]
 
 
-# ============================================================
-# GENERAL EXCLUDES
-# ============================================================
-
 GENERAL_EXCLUDE_TERMS = [
     "آگاتا کریستی",
     "خانم مارپل",
     "فال حافظ",
     "فال روزانه",
-
     "سردار آزمون",
     "تیم ملی فوتبال",
     "تیم ملی",
@@ -591,7 +677,6 @@ GENERAL_EXCLUDE_TERMS = [
     "لیگ برتر",
     "استقلال",
     "پرسپولیس",
-
     "سلبریتی",
     "فال",
     "مد و زیبایی",
@@ -603,10 +688,13 @@ GENERAL_EXCLUDE_TERMS = [
 # ============================================================
 
 def clean_text(value):
+
     if not value:
         return ""
 
-    value = html.unescape(str(value))
+    value = html.unescape(
+        str(value)
+    )
 
     soup = BeautifulSoup(
         value,
@@ -626,15 +714,23 @@ def clean_text(value):
 
 
 def normalize_persian_text(text):
-    """
-    ZWNJ به space تبدیل می‌شود.
-    """
 
     text = clean_text(text)
 
-    text = text.replace("\u200c", " ")
-    text = text.replace("\u200e", "")
-    text = text.replace("\u200f", "")
+    text = text.replace(
+        "\u200c",
+        " ",
+    )
+
+    text = text.replace(
+        "\u200e",
+        "",
+    )
+
+    text = text.replace(
+        "\u200f",
+        "",
+    )
 
     replacements = {
         "ي": "ی",
@@ -667,7 +763,10 @@ def normalize_persian_text(text):
 
 
 def normalize_title(text):
-    text = normalize_persian_text(text).lower()
+
+    text = normalize_persian_text(
+        text
+    ).lower()
 
     remove_words = [
         "خبر",
@@ -681,6 +780,7 @@ def normalize_title(text):
     ]
 
     for word in remove_words:
+
         text = re.sub(
             rf"(?<!\w){re.escape(word)}(?!\w)",
             " ",
@@ -700,7 +800,27 @@ def normalize_title(text):
     ).strip()
 
 
+def tokenize(text):
+
+    text = normalize_persian_text(
+        text
+    ).lower()
+
+    text = re.sub(
+        r"[^\w\u0600-\u06FF\s]",
+        " ",
+        text,
+    )
+
+    return [
+        x
+        for x in text.split()
+        if len(x) >= 2
+    ]
+
+
 def term_in(text, term):
+
     if not term:
         return False
 
@@ -711,10 +831,16 @@ def term_in(text, term):
 
 
 def has_any(text, terms):
-    normalized_text = normalize_persian_text(text)
+
+    normalized_text = (
+        normalize_persian_text(text)
+    )
 
     for term in terms:
-        normalized_term = normalize_persian_text(term)
+
+        normalized_term = (
+            normalize_persian_text(term)
+        )
 
         if term_in(
             normalized_text,
@@ -730,6 +856,7 @@ def has_any(text, terms):
 # ============================================================
 
 def normalize_url(url):
+
     if not url:
         return ""
 
@@ -751,7 +878,9 @@ def normalize_url(url):
 
 
 def get_domain(url):
+
     try:
+
         domain = (
             urlparse(url).hostname
             or ""
@@ -767,6 +896,7 @@ def get_domain(url):
 
 
 def is_blocked_url(url):
+
     domain = get_domain(url)
 
     if not domain:
@@ -776,7 +906,9 @@ def is_blocked_url(url):
         return True
 
     return any(
-        domain.endswith("." + blocked)
+        domain.endswith(
+            "." + blocked
+        )
         for blocked in BLOCKED_DOMAINS
     )
 
@@ -785,6 +917,7 @@ def is_allowed_source_url(
     url,
     source_domain,
 ):
+
     domain = get_domain(url)
 
     if not domain:
@@ -806,9 +939,12 @@ def is_allowed_source_url(
 # ============================================================
 
 def write_lock():
+
     fd = os.open(
         LOCK_FILE,
-        os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+        os.O_CREAT
+        | os.O_EXCL
+        | os.O_WRONLY,
     )
 
     with os.fdopen(
@@ -827,14 +963,18 @@ def write_lock():
 
 
 def acquire_lock():
+
     try:
+
         write_lock()
+
         return True
 
     except FileExistsError:
         pass
 
     try:
+
         with open(
             LOCK_FILE,
             "r",
@@ -844,34 +984,47 @@ def acquire_lock():
             data = json.load(f)
 
         lock_time = float(
-            data.get("time", 0)
+            data.get(
+                "time",
+                0,
+            )
         )
 
         lock_pid = int(
-            data.get("pid", 0)
+            data.get(
+                "pid",
+                0,
+            )
         )
 
     except Exception:
+
         return False
 
-    # اگر قفل تازه است، دست نزن
-    if time.time() - lock_time <= 600:
+    if (
+        time.time()
+        - lock_time
+        <= 600
+    ):
+
         return False
 
-    # قفل قدیمی است؛ PID را بررسی کن
     alive = False
 
     try:
+
         os.kill(
             lock_pid,
             0,
         )
+
         alive = True
 
     except (
         OSError,
         ProcessLookupError,
     ):
+
         alive = False
 
     if alive:
@@ -883,21 +1036,29 @@ def acquire_lock():
     )
 
     try:
-        os.remove(LOCK_FILE)
+
+        os.remove(
+            LOCK_FILE
+        )
 
     except FileNotFoundError:
         pass
 
     try:
+
         write_lock()
+
         return True
 
     except FileExistsError:
+
         return False
 
 
 def release_lock():
+
     try:
+
         if not os.path.exists(
             LOCK_FILE
         ):
@@ -912,12 +1073,17 @@ def release_lock():
             data = json.load(f)
 
         if int(
-            data.get("pid", 0)
+            data.get(
+                "pid",
+                0,
+            )
         ) != os.getpid():
 
             return
 
-        os.remove(LOCK_FILE)
+        os.remove(
+            LOCK_FILE
+        )
 
     except Exception:
         pass
@@ -927,9 +1093,16 @@ def release_lock():
 # STATE
 # ============================================================
 
-def prune_file(path, keep):
+def prune_file(
+    path,
+    keep,
+):
+
     try:
-        if not os.path.exists(path):
+
+        if not os.path.exists(
+            path
+        ):
             return
 
         with open(
@@ -958,6 +1131,7 @@ def prune_file(path, keep):
             )
 
     except Exception as exc:
+
         log.warning(
             f"Prune failed for "
             f"{path}: {exc}"
@@ -965,12 +1139,14 @@ def prune_file(path, keep):
 
 
 def load_sent_links():
+
     if not os.path.exists(
         STATE_FILE
     ):
         return set()
 
     try:
+
         with open(
             STATE_FILE,
             "r",
@@ -978,17 +1154,23 @@ def load_sent_links():
         ) as f:
 
             return {
-                normalize_url(line.strip())
+                normalize_url(
+                    line.strip()
+                )
                 for line in f
                 if line.strip()
             }
 
     except Exception:
+
         return set()
 
 
 def save_sent_link(link):
-    link = normalize_url(link)
+
+    link = normalize_url(
+        link
+    )
 
     if not link:
         return
@@ -1005,12 +1187,14 @@ def save_sent_link(link):
 
 
 def load_sent_titles():
+
     if not os.path.exists(
         TITLES_FILE
     ):
         return []
 
     try:
+
         with open(
             TITLES_FILE,
             "r",
@@ -1024,10 +1208,12 @@ def load_sent_titles():
             ][-MAX_TITLES_KEPT:]
 
     except Exception:
+
         return []
 
 
 def save_sent_title(title):
+
     normalized = normalize_title(
         title
     )
@@ -1052,10 +1238,11 @@ def save_sent_title(title):
 
 
 # ============================================================
-# PUBLISH STATE
+# PUBLISHED STATE
 # ============================================================
 
 def load_publish_state():
+
     default = {
         "last_publish": 0
     }
@@ -1066,6 +1253,7 @@ def load_publish_state():
         return default
 
     try:
+
         with open(
             PUBLISHED_STATE_FILE,
             "r",
@@ -1083,16 +1271,24 @@ def load_publish_state():
         return state
 
     except Exception:
+
         return default
 
 
-def save_publish_state(extra=None):
+def save_publish_state(
+    extra=None
+):
+
     state = load_publish_state()
 
-    state["last_publish"] = time.time()
+    state["last_publish"] = (
+        time.time()
+    )
 
     if extra:
-        state.update(extra)
+        state.update(
+            extra
+        )
 
     with open(
         PUBLISHED_STATE_FILE,
@@ -1109,19 +1305,26 @@ def save_publish_state(extra=None):
 
 
 def can_publish():
+
     state = load_publish_state()
 
     try:
+
         last_publish = float(
             state.get(
                 "last_publish",
                 0,
             )
         )
+
     except Exception:
+
         last_publish = 0
 
-    elapsed = time.time() - last_publish
+    elapsed = (
+        time.time()
+        - last_publish
+    )
 
     required = (
         PUBLISH_INTERVAL_MINUTES
@@ -1145,10 +1348,104 @@ def can_publish():
 
 
 # ============================================================
+# EVENT STATE
+# ============================================================
+
+def load_events():
+
+    if not os.path.exists(
+        EVENTS_FILE
+    ):
+        return []
+
+    try:
+
+        with open(
+            EVENTS_FILE,
+            "r",
+            encoding="utf-8",
+        ) as f:
+
+            events = json.load(f)
+
+        if not isinstance(
+            events,
+            list,
+        ):
+            return []
+
+        return events
+
+    except Exception as exc:
+
+        log.warning(
+            f"Could not load events: "
+            f"{exc}"
+        )
+
+        return []
+
+
+def save_events(events):
+
+    events = sorted(
+        events,
+        key=lambda x: x.get(
+            "published_at",
+            0,
+        ),
+        reverse=True,
+    )
+
+    events = events[
+        :MAX_EVENTS_KEPT
+    ]
+
+    with open(
+        EVENTS_FILE,
+        "w",
+        encoding="utf-8",
+    ) as f:
+
+        json.dump(
+            events,
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+
+def make_event_id(item):
+
+    base = (
+        normalize_title(
+            item.get(
+                "title",
+                "",
+            )
+        )
+        + "|"
+        + normalize_persian_text(
+            item.get(
+                "summary",
+                "",
+            )
+        )[:500]
+    )
+
+    return hashlib.sha1(
+        base.encode(
+            "utf-8"
+        )
+    ).hexdigest()
+
+
+# ============================================================
 # DATE
 # ============================================================
 
 def parse_date(entry):
+
     try:
 
         if getattr(
@@ -1198,6 +1495,7 @@ def parse_date(entry):
     )
 
     if raw:
+
         try:
 
             dt = (
@@ -1208,6 +1506,7 @@ def parse_date(entry):
             )
 
             if dt.tzinfo is None:
+
                 dt = dt.replace(
                     tzinfo=timezone.utc
                 )
@@ -1227,6 +1526,7 @@ def parse_date(entry):
 # ============================================================
 
 def make_summary(entry):
+
     text = ""
 
     if getattr(
@@ -1234,6 +1534,7 @@ def make_summary(entry):
         "summary",
         None,
     ):
+
         text = clean_text(
             entry.summary
         )
@@ -1243,6 +1544,7 @@ def make_summary(entry):
         "description",
         None,
     ):
+
         text = clean_text(
             entry.description
         )
@@ -1257,9 +1559,13 @@ def make_summary(entry):
     )
 
     if len(text) > 500:
+
         text = (
             text[:497]
-            .rsplit(" ", 1)[0]
+            .rsplit(
+                " ",
+                1,
+            )[0]
             + "..."
         )
 
@@ -1270,21 +1576,20 @@ def make_summary(entry):
 # LOCATION CHECKS
 # ============================================================
 
-def other_province_in_title(title):
+def other_province_in_title(
+    title
+):
+
     t = normalize_persian_text(
         title
     )
 
-    # اگر خود استان ما در عنوان هست،
-    # استان دیگر را به‌تنهایی منفی نکن
     if has_any(
         t,
         PROVINCE_TERMS,
     ):
         return False
 
-    # اگر شهر محلی در عنوان هست،
-    # اجازه عبور بده
     if has_any(
         t,
         CITY_TERMS,
@@ -1297,7 +1602,10 @@ def other_province_in_title(title):
     )
 
 
-def foreign_location_in_title(title):
+def foreign_location_in_title(
+    title
+):
+
     t = normalize_persian_text(
         title
     )
@@ -1337,6 +1645,7 @@ def score_terms(
     title_score,
     body_score,
 ):
+
     score = 0
 
     for term in terms:
@@ -1372,6 +1681,7 @@ def local_score(
     title,
     summary,
 ):
+
     normalized_title = (
         normalize_persian_text(
             title
@@ -1392,19 +1702,18 @@ def local_score(
 
     score = 0
 
-    # استان دیگر در عنوان
     if other_province_in_title(
         title
     ):
+
         score -= 120
 
-    # کشور/شهر خارجی در عنوان
     if foreign_location_in_title(
         title
     ):
+
         score -= 120
 
-    # استان
     score += score_terms(
         full,
         normalized_title,
@@ -1413,7 +1722,6 @@ def local_score(
         12,
     )
 
-    # شهر
     score += score_terms(
         full,
         normalized_title,
@@ -1422,7 +1730,6 @@ def local_score(
         4,
     )
 
-    # نشانه‌های خاص منطقه
     score += score_terms(
         full,
         normalized_title,
@@ -1431,7 +1738,6 @@ def local_score(
         10,
     )
 
-    # فرهنگ
     score += score_terms(
         full,
         normalized_title,
@@ -1440,7 +1746,6 @@ def local_score(
         10,
     )
 
-    # زمینه محلی
     context_count = sum(
         1
         for term in LOCAL_CONTEXT_TERMS
@@ -1464,7 +1769,10 @@ def local_score(
 # TITLE LOCALITY
 # ============================================================
 
-def title_locality_type(title):
+def title_locality_type(
+    title
+):
+
     t = normalize_persian_text(
         title
     )
@@ -1497,7 +1805,7 @@ def title_locality_type(title):
 
 
 # ============================================================
-# STRICT LOCAL NEWS FILTER
+# STRICT LOCAL FILTER
 # ============================================================
 
 def is_real_local_news(
@@ -1505,6 +1813,7 @@ def is_real_local_news(
     summary,
     score=None,
 ):
+
     normalized_title = (
         normalize_persian_text(
             title
@@ -1523,27 +1832,23 @@ def is_real_local_news(
         + normalized_summary
     ).strip()
 
-    # --------------------------------------------------------
-    # استان دیگر در عنوان
-    # --------------------------------------------------------
-
     if other_province_in_title(
         title
     ):
-        return False, "other province in title"
 
-    # --------------------------------------------------------
-    # موقعیت خارجی در عنوان
-    # --------------------------------------------------------
+        return (
+            False,
+            "other province in title",
+        )
 
     if foreign_location_in_title(
         title
     ):
-        return False, "foreign location in title"
 
-    # --------------------------------------------------------
-    # محتوای عمومی/نامرتبط
-    # --------------------------------------------------------
+        return (
+            False,
+            "foreign location in title",
+        )
 
     for term in GENERAL_EXCLUDE_TERMS:
 
@@ -1557,13 +1862,11 @@ def is_real_local_news(
             full,
             normalized_term,
         ):
-            return False, (
-                f"general exclude: {term}"
-            )
 
-    # --------------------------------------------------------
-    # نشانه‌های محلی
-    # --------------------------------------------------------
+            return (
+                False,
+                f"general exclude: {term}",
+            )
 
     has_province = has_any(
         full,
@@ -1591,13 +1894,14 @@ def is_real_local_news(
         or has_special
         or has_culture
     ):
-        return False, "no local signal"
 
-    # --------------------------------------------------------
-    # امتیاز
-    # --------------------------------------------------------
+        return (
+            False,
+            "no local signal",
+        )
 
     if score is None:
+
         score = local_score(
             title,
             summary,
@@ -1607,52 +1911,50 @@ def is_real_local_news(
         title
     )
 
-    # --------------------------------------------------------
-    # عنوان با نام استان
-    # --------------------------------------------------------
-
     if title_type == "province":
 
         if score < MIN_PROVINCE_SCORE:
-            return False, (
-                f"province score too low: {score}"
+
+            return (
+                False,
+                f"province score too low: {score}",
             )
 
-        return True, "province title"
-
-    # --------------------------------------------------------
-    # عنوان با نشانه خاص
-    # --------------------------------------------------------
+        return (
+            True,
+            "province title",
+        )
 
     if title_type == "special":
 
         if score < MIN_SPECIAL_SCORE:
-            return False, (
-                f"special score too low: {score}"
+
+            return (
+                False,
+                f"special score too low: {score}",
             )
 
-        return True, "special local title"
-
-    # --------------------------------------------------------
-    # عنوان فرهنگی
-    # --------------------------------------------------------
+        return (
+            True,
+            "special local title",
+        )
 
     if title_type == "culture":
 
         if score < 25:
-            return False, (
-                f"culture score too low: {score}"
+
+            return (
+                False,
+                f"culture score too low: {score}",
             )
 
-        return True, "culture title"
-
-    # --------------------------------------------------------
-    # عنوان شهری
-    # --------------------------------------------------------
+        return (
+            True,
+            "culture title",
+        )
 
     if title_type == "city":
 
-        # شهر در عنوان + حداقل یک زمینه محلی
         context_count = sum(
             1
             for term in LOCAL_CONTEXT_TERMS
@@ -1664,82 +1966,94 @@ def is_real_local_news(
             )
         )
 
-        # اگر فقط نام شهر آمده ولی
-        # هیچ زمینه محلی وجود ندارد
         if context_count == 0:
 
-            # فقط وقتی اجازه بده که
-            # استان/موضوع خاص هم در متن باشد
             if not (
                 has_province
                 or has_special
                 or has_culture
             ):
-                return False, (
-                    "city mentioned without local context"
+
+                return (
+                    False,
+                    "city without local context",
                 )
 
         if score < MIN_CITY_SCORE:
-            return False, (
-                f"city score too low: {score}"
+
+            return (
+                False,
+                f"city score too low: {score}",
             )
 
-        return True, "city title"
+        return (
+            True,
+            "city title",
+        )
 
-    # --------------------------------------------------------
-    # نشانه محلی فقط در خلاصه
-    # --------------------------------------------------------
-
-    # این بخش سخت‌گیرانه است.
-    # صرفاً اشاره در summary کافی نیست.
     if not (
         has_province
         or has_special
         or has_culture
     ):
-        return False, (
-            "local signal only in weak body context"
+
+        return (
+            False,
+            "weak body local context",
         )
 
     if score < 30:
-        return False, (
-            f"body local score too low: {score}"
+
+        return (
+            False,
+            f"body local score too low: {score}",
         )
 
-    return True, "body local signal"
+    return (
+        True,
+        "body local signal",
+    )
 
 
 # ============================================================
-# TITLE SIMILARITY
+# TEXT SIMILARITY
 # ============================================================
 
-def title_similarity(
+def sequence_similarity(
     a,
     b,
 ):
-    na = normalize_title(a)
-    nb = normalize_title(b)
 
-    if not na or not nb:
+    a = normalize_title(a)
+    b = normalize_title(b)
+
+    if not a or not b:
         return 0.0
 
-    sequence_ratio = (
-        difflib.SequenceMatcher(
-            None,
-            na,
-            nb,
-        ).ratio()
-    )
+    return difflib.SequenceMatcher(
+        None,
+        a,
+        b,
+    ).ratio()
+
+
+def jaccard_similarity(
+    a,
+    b,
+):
 
     sa = set(
-        na.split()
+        tokenize(a)
     )
 
     sb = set(
-        nb.split()
+        tokenize(b)
     )
 
-    jaccard = (
+    if not sa or not sb:
+        return 0.0
+
+    return (
         len(sa & sb)
         / max(
             len(sa | sb),
@@ -1747,27 +2061,515 @@ def title_similarity(
         )
     )
 
-    return max(
-        sequence_ratio,
-        jaccard,
+
+# ============================================================
+# DISTINCTIVE WORDS
+# ============================================================
+
+STOP_WORDS = {
+    "از",
+    "به",
+    "در",
+    "با",
+    "برای",
+    "و",
+    "یا",
+    "که",
+    "این",
+    "آن",
+    "یک",
+    "شد",
+    "شده",
+    "شود",
+    "کرد",
+    "کرده",
+    "است",
+    "هست",
+    "بود",
+    "بودند",
+    "نیز",
+    "اما",
+    "هم",
+    "بر",
+    "تا",
+    "را",
+    "وی",
+    "او",
+    "آنها",
+    "ما",
+    "من",
+    "ایران",
+    "کشور",
+    "استان",
+    "خبر",
+    "گزارش",
+    "اعلام",
+    "آخرین",
+    "مهم",
+    "جدید",
+    "امروز",
+    "دیروز",
+}
+
+
+def distinctive_words(text):
+
+    words = tokenize(
+        text
+    )
+
+    result = []
+
+    for word in words:
+
+        if word in STOP_WORDS:
+            continue
+
+        if len(word) < 3:
+            continue
+
+        result.append(
+            word
+        )
+
+    return set(
+        result
     )
 
 
-def is_duplicate(
-    title,
-    recent_titles,
+def distinctive_similarity(
+    a,
+    b,
 ):
-    for old_title in recent_titles:
 
-        similarity = title_similarity(
-            title,
-            old_title,
+    sa = distinctive_words(a)
+    sb = distinctive_words(b)
+
+    if not sa or not sb:
+        return 0.0
+
+    return (
+        len(sa & sb)
+        / max(
+            len(sa | sb),
+            1,
+        )
+    )
+
+
+# ============================================================
+# EVENT SIMILARITY
+# ============================================================
+
+def event_similarity(
+    item_a,
+    item_b,
+):
+
+    title_a = item_a.get(
+        "title",
+        "",
+    )
+
+    title_b = item_b.get(
+        "title",
+        "",
+    )
+
+    summary_a = item_a.get(
+        "summary",
+        "",
+    )
+
+    summary_b = item_b.get(
+        "summary",
+        "",
+    )
+
+    # --------------------------------------------------------
+    # عنوان
+    # --------------------------------------------------------
+
+    title_score = max(
+        sequence_similarity(
+            title_a,
+            title_b,
+        ),
+        jaccard_similarity(
+            title_a,
+            title_b,
+        ),
+    )
+
+    # --------------------------------------------------------
+    # خلاصه
+    # --------------------------------------------------------
+
+    summary_score = max(
+        jaccard_similarity(
+            summary_a,
+            summary_b,
+        ),
+        sequence_similarity(
+            summary_a,
+            summary_b,
+        ),
+    )
+
+    # --------------------------------------------------------
+    # واژه‌های متمایز
+    # --------------------------------------------------------
+
+    distinctive_score = (
+        distinctive_similarity(
+            title_a
+            + " "
+            + summary_a,
+            title_b
+            + " "
+            + summary_b,
+        )
+    )
+
+    # --------------------------------------------------------
+    # شباهت کاراکتری
+    # --------------------------------------------------------
+
+    character_score = (
+        sequence_similarity(
+            title_a
+            + " "
+            + summary_a,
+            title_b
+            + " "
+            + summary_b,
+        )
+    )
+
+    # --------------------------------------------------------
+    # امتیاز نهایی
+    # --------------------------------------------------------
+
+    final_score = (
+        title_score
+        * TITLE_WEIGHT
+        + summary_score
+        * SUMMARY_WEIGHT
+        + distinctive_score
+        * DISTINCTIVE_WEIGHT
+        + character_score
+        * CHARACTER_WEIGHT
+    )
+
+    return round(
+        final_score * 100,
+        2,
+    ), {
+        "title": round(
+            title_score * 100,
+            2,
+        ),
+        "summary": round(
+            summary_score * 100,
+            2,
+        ),
+        "distinctive": round(
+            distinctive_score * 100,
+            2,
+        ),
+        "character": round(
+            character_score * 100,
+            2,
+        ),
+    }
+
+
+# ============================================================
+# EVENT MATCH
+# ============================================================
+
+def event_matches(
+    item,
+    event,
+):
+
+    try:
+
+        published_at = float(
+            event.get(
+                "published_at",
+                0,
+            )
         )
 
-        if similarity >= TITLE_DUP_THRESHOLD:
-            return True
+        item_timestamp = (
+            item["published"]
+            .timestamp()
+        )
 
-    return False
+        distance_hours = abs(
+            item_timestamp
+            - published_at
+        ) / 3600
+
+        if (
+            distance_hours
+            > EVENT_MAX_AGE_HOURS
+        ):
+
+            return (
+                False,
+                0,
+                {},
+                "event too old",
+            )
+
+    except Exception:
+
+        distance_hours = 0
+
+    reference = {
+        "title": event.get(
+            "title",
+            "",
+        ),
+        "summary": event.get(
+            "summary",
+            "",
+        ),
+    }
+
+    score, details = (
+        event_similarity(
+            item,
+            reference,
+        )
+    )
+
+    # --------------------------------------------------------
+    # امتیاز خیلی بالا
+    # --------------------------------------------------------
+
+    if score >= EVENT_DUPLICATE_THRESHOLD:
+
+        return (
+            True,
+            score,
+            details,
+            "duplicate event",
+        )
+
+    # --------------------------------------------------------
+    # امتیاز متوسط
+    # --------------------------------------------------------
+
+    if score >= EVENT_PROBABLE_THRESHOLD:
+
+        # اگر شهر/استان/کلیدواژه اصلی
+        # نیز مشترک باشد، تکراری محسوب می‌شود.
+
+        item_tokens = (
+            distinctive_words(
+                item["title"]
+                + " "
+                + item["summary"]
+            )
+        )
+
+        event_tokens = (
+            distinctive_words(
+                event.get(
+                    "title",
+                    "",
+                )
+                + " "
+                + event.get(
+                    "summary",
+                    "",
+                )
+            )
+        )
+
+        overlap = (
+            len(
+                item_tokens
+                & event_tokens
+            )
+            / max(
+                len(
+                    item_tokens
+                    | event_tokens
+                ),
+                1,
+            )
+        )
+
+        if overlap >= 0.35:
+
+            return (
+                True,
+                score,
+                details,
+                "probable duplicate event",
+            )
+
+    return (
+        False,
+        score,
+        details,
+        "new event",
+    )
+
+
+# ============================================================
+# EVENT CLUSTERING
+# ============================================================
+
+def cluster_candidates(
+    candidates,
+    existing_events,
+):
+
+    clusters = []
+
+    # --------------------------------------------------------
+    # ابتدا خبرهای جدید را بر اساس شباهت
+    # به گروه‌های داخلی تقسیم می‌کنیم.
+    # --------------------------------------------------------
+
+    for item in candidates:
+
+        assigned = False
+
+        best_cluster = None
+        best_score = 0
+
+        for cluster in clusters:
+
+            reference = cluster[0]
+
+            score, _ = (
+                event_similarity(
+                    item,
+                    reference,
+                )
+            )
+
+            if score > best_score:
+
+                best_score = score
+                best_cluster = cluster
+
+        if (
+            best_cluster is not None
+            and best_score
+            >= EVENT_PROBABLE_THRESHOLD
+        ):
+
+            best_cluster.append(
+                item
+            )
+
+            assigned = True
+
+            log.info(
+                "EVENT CLUSTER MERGE: "
+                f"{item['title']} "
+                f"score={best_score}"
+            )
+
+        if not assigned:
+
+            clusters.append(
+                [item]
+            )
+
+    # --------------------------------------------------------
+    # هر گروه یک event candidate است.
+    # --------------------------------------------------------
+
+    return clusters
+
+
+# ============================================================
+# BEST VERSION OF EVENT
+# ============================================================
+
+def candidate_quality(item):
+
+    local = item.get(
+        "local_score",
+        0,
+    )
+
+    fresh = item.get(
+        "freshness",
+        0,
+    )
+
+    summary_length = len(
+        item.get(
+            "summary",
+            "",
+        )
+    )
+
+    # وجود خلاصه کامل‌تر امتیاز می‌دهد
+    summary_quality = min(
+        summary_length / 250,
+        1.0,
+    ) * 15
+
+    # نسخه نهایی
+    return (
+        local
+        + fresh
+        + summary_quality
+    )
+
+
+def select_best_version(
+    cluster
+):
+
+    ranked = sorted(
+        cluster,
+        key=lambda item: (
+            candidate_quality(item),
+            item.get(
+                "local_score",
+                0,
+            ),
+            item.get(
+                "freshness",
+                0,
+            ),
+            item["published"],
+        ),
+        reverse=True,
+    )
+
+    selected = ranked[0]
+
+    if len(cluster) > 1:
+
+        log.info(
+            "EVENT GROUP "
+            f"contains {len(cluster)} "
+            "sources:"
+        )
+
+        for candidate in ranked:
+
+            log.info(
+                "  SOURCE VERSION: "
+                f"[{candidate['source']}] "
+                f"{candidate['title']} "
+                f"quality="
+                f"{candidate_quality(candidate):.2f}"
+            )
+
+    return selected
 
 
 # ============================================================
@@ -1775,18 +2577,21 @@ def is_duplicate(
 # ============================================================
 
 def freshness_score(
-    published,
+    published
 ):
+
     now = datetime.now(
         timezone.utc
     )
 
     try:
+
         age_hours = (
             now - published
         ).total_seconds() / 3600
 
     except Exception:
+
         return 0
 
     if age_hours < 0:
@@ -1795,7 +2600,6 @@ def freshness_score(
     if age_hours >= FRESHNESS_HOURS:
         return 0
 
-    # حداکثر 20 امتیاز
     return max(
         0,
         int(
@@ -1816,6 +2620,7 @@ def freshness_score(
 # ============================================================
 
 def collect_news():
+
     now = datetime.now(
         timezone.utc
     )
@@ -1904,6 +2709,7 @@ def collect_news():
                 )
 
                 if len(summary) > 480:
+
                     summary = (
                         summary[:477]
                         + "..."
@@ -1917,6 +2723,7 @@ def collect_news():
                     ),
                     "published": published,
                     "source": source_name,
+                    "source_domain": source_domain,
                 })
 
     # --------------------------------------------------------
@@ -1926,6 +2733,7 @@ def collect_news():
     unique = {}
 
     for item in items:
+
         unique[
             item["link"]
         ] = item
@@ -1942,51 +2750,72 @@ def collect_news():
 
 
 # ============================================================
-# SELECT BEST
+# PREPARE CANDIDATES
 # ============================================================
 
-def select_best(
+def prepare_candidates(
     news,
     sent_links,
     sent_titles,
 ):
+
     candidates = []
 
     for item in news:
-
-        # ----------------------------------------------------
-        # لینک قبلاً منتشر شده
-        # ----------------------------------------------------
 
         normalized_link = normalize_url(
             item["link"]
         )
 
+        # ----------------------------------------------------
+        # LINK DUPLICATE
+        # ----------------------------------------------------
+
         if normalized_link in sent_links:
-            log.info(
-                f"SKIP duplicate link: "
-                f"{item['title']}"
-            )
-            continue
-
-        # ----------------------------------------------------
-        # عنوان تکراری
-        # ----------------------------------------------------
-
-        if is_duplicate(
-            item["title"],
-            sent_titles,
-        ):
 
             log.info(
-                f"SKIP duplicate title: "
+                "SKIP LINK DUPLICATE: "
                 f"{item['title']}"
             )
 
             continue
 
         # ----------------------------------------------------
-        # local score
+        # TITLE DUPLICATE
+        # ----------------------------------------------------
+
+        duplicate_title = False
+
+        for old_title in sent_titles:
+
+            score = max(
+                sequence_similarity(
+                    item["title"],
+                    old_title,
+                ),
+                jaccard_similarity(
+                    item["title"],
+                    old_title,
+                ),
+            )
+
+            if score >= 0.75:
+
+                duplicate_title = True
+
+                log.info(
+                    "SKIP TITLE DUPLICATE: "
+                    f"{item['title']} "
+                    f"score={score:.2f}"
+                )
+
+                break
+
+        if duplicate_title:
+            continue
+
+        # ----------------------------------------------------
+        # LOCAL FILTER
         # ----------------------------------------------------
 
         local = local_score(
@@ -1994,7 +2823,7 @@ def select_best(
             item["summary"],
         )
 
-        is_local, reason = (
+        valid, reason = (
             is_real_local_news(
                 item["title"],
                 item["summary"],
@@ -2002,10 +2831,10 @@ def select_best(
             )
         )
 
-        if not is_local:
+        if not valid:
 
             log.info(
-                f"SKIP local filter "
+                "SKIP LOCAL FILTER "
                 f"[{reason}]: "
                 f"{item['title']}"
             )
@@ -2013,72 +2842,230 @@ def select_best(
             continue
 
         # ----------------------------------------------------
-        # freshness
+        # FRESHNESS
         # ----------------------------------------------------
 
         fresh = freshness_score(
             item["published"]
         )
 
-        # ----------------------------------------------------
-        # امتیاز نهایی
-        # ----------------------------------------------------
+        item["local_score"] = local
+        item["freshness"] = fresh
+        item["filter_reason"] = reason
 
-        final_score = (
-            local
-            + fresh
-        )
-
-        candidate = dict(
+        candidates.append(
             item
         )
 
-        candidate["local_score"] = local
-        candidate["freshness"] = fresh
-        candidate["score"] = final_score
-        candidate["filter_reason"] = reason
+    return candidates
 
-        candidates.append(
-            candidate
+
+# ============================================================
+# REMOVE EVENTS ALREADY PUBLISHED
+# ============================================================
+
+def remove_published_events(
+    candidates,
+    events,
+):
+
+    remaining = []
+
+    for item in candidates:
+
+        matched_event = None
+        matched_score = 0
+        matched_details = {}
+        matched_reason = ""
+
+        for event in events:
+
+            (
+                matched,
+                score,
+                details,
+                reason,
+            ) = event_matches(
+                item,
+                event,
+            )
+
+            if (
+                matched
+                and score > matched_score
+            ):
+
+                matched_event = event
+                matched_score = score
+                matched_details = details
+                matched_reason = reason
+
+        if matched_event is not None:
+
+            log.info(
+                "SKIP ALREADY PUBLISHED EVENT: "
+                f"{item['title']}"
+            )
+
+            log.info(
+                "  matched event: "
+                f"{matched_event.get('title', '')}"
+            )
+
+            log.info(
+                "  event score: "
+                f"{matched_score}"
+            )
+
+            log.info(
+                "  details: "
+                f"{matched_details}"
+            )
+
+            log.info(
+                "  reason: "
+                f"{matched_reason}"
+            )
+
+            continue
+
+        remaining.append(
+            item
         )
+
+    return remaining
+
+
+# ============================================================
+# SELECT BEST EVENT
+# ============================================================
+
+def select_best_event(
+    candidates
+):
 
     if not candidates:
         return None
 
+    clusters = cluster_candidates(
+        candidates,
+        [],
+    )
+
+    event_versions = []
+
+    for cluster in clusters:
+
+        selected = (
+            select_best_version(
+                cluster
+            )
+        )
+
+        selected = dict(
+            selected
+        )
+
+        selected[
+            "event_size"
+        ] = len(cluster)
+
+        selected[
+            "event_sources"
+        ] = list({
+            x["source"]
+            for x in cluster
+        })
+
+        event_versions.append(
+            selected
+        )
+
     # --------------------------------------------------------
-    # ابتدا امتیاز نهایی
-    # سپس امتیاز محلی
-    # سپس تازگی
+    # انتخاب بهترین رویداد برای انتشار
     # --------------------------------------------------------
 
-    candidates.sort(
+    event_versions.sort(
         key=lambda item: (
-            item["score"],
-            item["local_score"],
-            item["freshness"],
+            item.get(
+                "local_score",
+                0,
+            ),
+            item.get(
+                "freshness",
+                0,
+            ),
+            candidate_quality(
+                item
+            ),
             item["published"],
         ),
         reverse=True,
     )
 
-    selected = candidates[0]
+    return event_versions[0]
 
-    log.info(
-        "BEST candidate: "
-        f"score={selected['score']} "
-        f"local={selected['local_score']} "
-        f"fresh={selected['freshness']} "
-        f"title={selected['title']}"
+
+# ============================================================
+# SAVE EVENT
+# ============================================================
+
+def register_published_event(
+    item
+):
+
+    events = load_events()
+
+    event = {
+        "event_id": make_event_id(
+            item
+        ),
+        "title": item[
+            "title"
+        ],
+        "summary": item[
+            "summary"
+        ],
+        "link": item[
+            "link"
+        ],
+        "source": item[
+            "source"
+        ],
+        "sources": item.get(
+            "event_sources",
+            [
+                item["source"]
+            ],
+        ),
+        "published_at": item[
+            "published"
+        ].timestamp(),
+        "registered_at": time.time(),
+        "local_score": item.get(
+            "local_score",
+            0,
+        ),
+    }
+
+    events.insert(
+        0,
+        event,
     )
 
-    return selected
+    save_events(
+        events
+    )
 
 
 # ============================================================
 # OG IMAGE
 # ============================================================
 
-def get_og_image(url):
+def get_og_image(
+    url
+):
+
     try:
 
         response = SESSION.get(
@@ -2113,17 +3100,33 @@ def get_og_image(url):
 
             if (
                 tag
-                and tag.get("content")
+                and tag.get(
+                    "content"
+                )
             ):
 
-                return tag[
-                    "content"
-                ].strip()
+                image = (
+                    tag[
+                        "content"
+                    ].strip()
+                )
+
+                if image.startswith(
+                    "//"
+                ):
+
+                    image = (
+                        "https:"
+                        + image
+                    )
+
+                return image
 
     except Exception as exc:
 
         log.warning(
-            f"OG image error: {exc}"
+            f"OG image error: "
+            f"{exc}"
         )
 
     return None
@@ -2137,6 +3140,7 @@ def safe_cut(
     text,
     max_length,
 ):
+
     if not text:
         return ""
 
@@ -2144,26 +3148,40 @@ def safe_cut(
         return text
 
     if max_length <= 3:
-        return text[:max_length]
+        return text[
+            :max_length
+        ]
 
-    return (
-        text[: max_length - 3]
-        .rsplit(" ", 1)[0]
-        + "..."
+    shortened = (
+        text[
+            : max_length - 3
+        ]
+        .rsplit(
+            " ",
+            1,
+        )[0]
     )
+
+    return shortened + "..."
 
 
 # ============================================================
 # MESSAGE
 # ============================================================
 
-def build_message(item):
+def build_message(
+    item
+):
+
     text = (
         "🚨 استان سیستان و بلوچستان\n\n"
         f"📰 {item['title']}\n\n"
     )
 
-    if item["summary"]:
+    if item.get(
+        "summary"
+    ):
+
         text += (
             item["summary"]
             + "\n\n"
@@ -2177,7 +3195,10 @@ def build_message(item):
     return text
 
 
-def build_keyboard(url):
+def build_keyboard(
+    url
+):
+
     return json.dumps(
         {
             "inline_keyboard": [
@@ -2216,6 +3237,7 @@ def bale_api(
     data=None,
     files=None,
 ):
+
     url = (
         "https://tapi.bale.ai/"
         f"bot{BOT_TOKEN}/{method}"
@@ -2232,7 +3254,10 @@ def bale_api(
 
     result = response.json()
 
-    if not result.get("ok"):
+    if not result.get(
+        "ok"
+    ):
+
         raise RuntimeError(
             result
         )
@@ -2244,10 +3269,9 @@ def bale_api(
 # PUBLISH ITEM
 # ============================================================
 
-def publish_item(item):
-    """
-    ارسال هر خبر در try/except مستقل.
-    """
+def publish_item(
+    item
+):
 
     try:
 
@@ -2260,7 +3284,7 @@ def publish_item(item):
         )
 
         # ----------------------------------------------------
-        # تلاش برای عکس
+        # OG IMAGE
         # ----------------------------------------------------
 
         image_url = get_og_image(
@@ -2277,6 +3301,8 @@ def publish_item(item):
                         timeout=12,
                     )
                 )
+
+                image_response.raise_for_status()
 
                 content_type = (
                     image_response
@@ -2327,12 +3353,12 @@ def publish_item(item):
             except Exception as exc:
 
                 log.warning(
-                    f"Photo publish failed: "
+                    "Photo publish failed: "
                     f"{exc}"
                 )
 
         # ----------------------------------------------------
-        # fallback text
+        # TEXT FALLBACK
         # ----------------------------------------------------
 
         bale_api(
@@ -2370,15 +3396,19 @@ def publish_item(item):
 def main():
 
     log.info(
-        "=" * 60
+        "=" * 70
     )
 
     log.info(
-        "JAHANTAB | جهان‌تاب v8.0 START"
+        "JAHANTAB | جهان‌تاب v9.0 START"
     )
 
     log.info(
-        "=" * 60
+        "Event-based duplicate detection ENABLED"
+    )
+
+    log.info(
+        "=" * 70
     )
 
     if not acquire_lock():
@@ -2392,7 +3422,7 @@ def main():
     try:
 
         # ----------------------------------------------------
-        # Cooldown
+        # COOLDOWN
         # ----------------------------------------------------
 
         if not can_publish():
@@ -2404,7 +3434,7 @@ def main():
             return
 
         # ----------------------------------------------------
-        # Load state
+        # LOAD STATE
         # ----------------------------------------------------
 
         sent_links = (
@@ -2415,41 +3445,127 @@ def main():
             load_sent_titles()
         )
 
+        published_events = (
+            load_events()
+        )
+
+        log.info(
+            f"Known links: "
+            f"{len(sent_links)}"
+        )
+
+        log.info(
+            f"Known titles: "
+            f"{len(sent_titles)}"
+        )
+
+        log.info(
+            f"Known events: "
+            f"{len(published_events)}"
+        )
+
         # ----------------------------------------------------
-        # Collect
+        # COLLECT
         # ----------------------------------------------------
 
         news = collect_news()
 
         log.info(
-            f"Collected news: "
+            f"Collected RSS items: "
             f"{len(news)}"
         )
 
+        if not news:
+
+            log.info(
+                "No RSS news collected"
+            )
+
+            return
+
         # ----------------------------------------------------
-        # Select
+        # LOCAL FILTER
         # ----------------------------------------------------
 
-        selected = select_best(
+        candidates = prepare_candidates(
             news,
             sent_links,
             sent_titles,
         )
 
-        if not selected:
+        log.info(
+            f"Local candidates: "
+            f"{len(candidates)}"
+        )
+
+        if not candidates:
 
             log.info(
-                "No suitable local "
-                "Sistan & Baluchestan "
-                "news found"
+                "No suitable local candidates"
             )
 
             return
 
+        # ----------------------------------------------------
+        # EVENT DEDUP AGAINST PREVIOUSLY
+        # PUBLISHED EVENTS
+        # ----------------------------------------------------
+
+        candidates = (
+            remove_published_events(
+                candidates,
+                published_events,
+            )
+        )
+
         log.info(
-            f"Selected: "
-            f"[{selected['source']}] "
-            f"{selected['title']}"
+            "Candidates after published-event "
+            f"dedup: {len(candidates)}"
+        )
+
+        if not candidates:
+
+            log.info(
+                "All candidates belong to "
+                "already published events"
+            )
+
+            return
+
+        # ----------------------------------------------------
+        # GROUP SAME EVENT
+        # ----------------------------------------------------
+
+        selected = select_best_event(
+            candidates
+        )
+
+        if not selected:
+
+            log.info(
+                "No event selected"
+            )
+
+            return
+
+        # ----------------------------------------------------
+        # LOG EVENT
+        # ----------------------------------------------------
+
+        log.info(
+            "=" * 70
+        )
+
+        log.info(
+            "SELECTED EVENT"
+        )
+
+        log.info(
+            f"Title: {selected['title']}"
+        )
+
+        log.info(
+            f"Source: {selected['source']}"
         )
 
         log.info(
@@ -2463,12 +3579,21 @@ def main():
         )
 
         log.info(
-            f"Final score: "
-            f"{selected['score']}"
+            f"Event versions: "
+            f"{selected.get('event_size', 1)}"
+        )
+
+        log.info(
+            f"Event sources: "
+            f"{selected.get('event_sources', [])}"
+        )
+
+        log.info(
+            "=" * 70
         )
 
         # ----------------------------------------------------
-        # Publish
+        # PUBLISH
         # ----------------------------------------------------
 
         published = publish_item(
@@ -2478,23 +3603,42 @@ def main():
         if not published:
 
             log.error(
-                "News was NOT published; "
-                "state files will NOT be updated"
+                "News was NOT published."
+            )
+
+            log.error(
+                "State files will NOT be updated."
             )
 
             return
 
         # ----------------------------------------------------
-        # Save state ONLY after successful publish
+        # SAVE LINK
         # ----------------------------------------------------
 
         save_sent_link(
             selected["link"]
         )
 
+        # ----------------------------------------------------
+        # SAVE TITLE
+        # ----------------------------------------------------
+
         save_sent_title(
             selected["title"]
         )
+
+        # ----------------------------------------------------
+        # REGISTER EVENT
+        # ----------------------------------------------------
+
+        register_published_event(
+            selected
+        )
+
+        # ----------------------------------------------------
+        # SAVE PUBLISH STATE
+        # ----------------------------------------------------
 
         save_publish_state(
             {
@@ -2508,14 +3652,41 @@ def main():
                     "source"
                 ],
                 "last_score": selected[
-                    "score"
+                    "local_score"
                 ],
+                "last_event_size": selected.get(
+                    "event_size",
+                    1,
+                ),
+                "last_event_sources": selected.get(
+                    "event_sources",
+                    [
+                        selected[
+                            "source"
+                        ]
+                    ],
+                ),
             }
         )
 
         log.info(
-            "Successfully published "
-            "and state saved"
+            "=" * 70
+        )
+
+        log.info(
+            "SUCCESS"
+        )
+
+        log.info(
+            "News published."
+        )
+
+        log.info(
+            "Link + title + event state saved."
+        )
+
+        log.info(
+            "=" * 70
         )
 
     except Exception as exc:
@@ -2538,4 +3709,5 @@ def main():
 # ============================================================
 
 if __name__ == "__main__":
+
     main()
