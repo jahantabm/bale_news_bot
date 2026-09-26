@@ -3,18 +3,22 @@
 ============================================================
 JAHANTAB | جهان‌تاب
 رصدخانه خبری سیستان و بلوچستان
-نسخه نهایی v9.0
+نسخه نهایی v9.1 - STRICT LOCAL FILTER
 ============================================================
 
 ARCHITECTURE
 ------------------------------------------------------------
 RSS
  ↓
+Source Validation
+ ↓
 Geographic Filter
  ↓
 Irrelevant-News Filter
  ↓
 Duplicate-Link Filter
+ ↓
+Duplicate-Title Filter
  ↓
 Event Similarity
  ↓
@@ -28,29 +32,24 @@ Freshness Scoring
  ↓
 Publish
 
-ویژگی‌های اصلی v9.0:
+ویژگی‌های نسخه v9.1:
 
-- فقط منابع داخلی و رسمی/شناخته‌شده ایرانی
+- فقط منابع داخلی و شناخته‌شده ایرانی
 - تمرکز سخت‌گیرانه بر سیستان و بلوچستان
+- عدم پذیرش خبر عمومی ایران
+- عدم پذیرش خبر خارجی
+- عدم پذیرش خبرهای سینمایی، ورزشی و سرگرمی
+- عدم پذیرش واژه‌های مبهم به‌عنوان مکان
+- واژه «سرباز» به‌تنهایی مکان محسوب نمی‌شود
+- نام شهر به‌تنهایی کافی نیست
+- اشاره حاشیه‌ای به استان کافی نیست
 - حذف لینک تکراری
 - حذف عنوان تکراری
 - تشخیص رویدادهای یکسان از چند خبرگزاری
 - گروه‌بندی خبرهای مربوط به یک رویداد
 - انتخاب بهترین نسخه خبر
-- جلوگیری از انتشار مجدد همان رویداد در اجراهای بعدی
+- جلوگیری از انتشار مجدد همان رویداد
 - Event Similarity چندمعیاره
-
-وزن تشخیص تکراری بودن رویداد:
-
-    عنوان             25%
-    خلاصه             35%
-    واژه‌های متمایز   25%
-    شباهت کاراکتری    15%
-
-- امتیاز خیلی بالا → تکراری قطعی
-- امتیاز متوسط → بررسی تکمیلی
-- امتیاز پایین → رویداد جدید
-
 - RSS date
 - email.utils fallback
 - freshness scoring
@@ -63,7 +62,7 @@ Publish
 - OG image
 - sendPhoto fallback
 - sendMessage fallback
-- لاگ کامل علت رد/ادغام خبر
+- لاگ کامل علت رد خبر
 ============================================================
 """
 
@@ -79,7 +78,7 @@ import difflib
 import hashlib
 
 from datetime import datetime, timezone, timedelta
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 
 import requests
 import feedparser
@@ -99,11 +98,13 @@ CHAT_ID = os.getenv("BALE_CHAT_ID")
 STATE_FILE = "sent_links.txt"
 TITLES_FILE = "sent_titles.txt"
 PUBLISHED_STATE_FILE = "published_state.json"
-
-# state مربوط به رویدادها
 EVENTS_FILE = "published_events.json"
 
 LOCK_FILE = "jahantab.lock"
+
+# ============================================================
+# انتشار حداکثر هر ۳۰ دقیقه
+# ============================================================
 
 PUBLISH_INTERVAL_MINUTES = 30
 
@@ -117,57 +118,42 @@ MAX_TEXT_LEN = 3900
 
 MAX_TITLES_KEPT = 500
 
-# ------------------------------------------------------------
+# ============================================================
 # EVENT DUPLICATION
-# ------------------------------------------------------------
+# ============================================================
 
-# امتیاز کلی از 0 تا 100
-#
-# >= 82
-# رویداد تقریباً قطعی تکراری
-#
-# 68 تا 81
-# احتمالاً همان رویداد
-#
-# < 68
-# رویداد جدید
-#
 EVENT_DUPLICATE_THRESHOLD = 82
 EVENT_PROBABLE_THRESHOLD = 68
-
-# اگر یک خبر با رویداد ذخیره‌شده بیش از این فاصله داشته باشد
-# دیگر به‌صورت خودکار همان رویداد فرض نمی‌شود.
 EVENT_MAX_AGE_HOURS = 72
 
-# ------------------------------------------------------------
+# ============================================================
 # EVENT WEIGHTS
-# ------------------------------------------------------------
+# ============================================================
 
 TITLE_WEIGHT = 0.25
 SUMMARY_WEIGHT = 0.35
 DISTINCTIVE_WEIGHT = 0.25
 CHARACTER_WEIGHT = 0.15
 
-# ------------------------------------------------------------
+# ============================================================
 # FRESHNESS
-# ------------------------------------------------------------
+# ============================================================
 
 FRESHNESS_HOURS = 24
 
-# ------------------------------------------------------------
+# ============================================================
 # LOCAL MINIMUM SCORES
-# ------------------------------------------------------------
+# ============================================================
 
-MIN_CITY_SCORE = 25
-MIN_PROVINCE_SCORE = 30
-MIN_SPECIAL_SCORE = 28
+MIN_CITY_SCORE = 30
+MIN_PROVINCE_SCORE = 35
+MIN_SPECIAL_SCORE = 35
 
-# ------------------------------------------------------------
+# ============================================================
 # STATE LIMITS
-# ------------------------------------------------------------
+# ============================================================
 
 MAX_EVENTS_KEPT = 600
-
 
 TELEGRAM_URL = "https://t.me/jahantab_news"
 BALE_URL = "https://ble.ir/jahantabnews"
@@ -207,7 +193,7 @@ def build_session():
             "AppleWebKit/537.36 "
             "(KHTML, like Gecko) "
             "Chrome/120.0 Safari/537.36 "
-            "JahantabBot/9.0"
+            "JahantabBot/9.1"
         ),
         "Accept-Language": "fa-IR,fa;q=0.9,en;q=0.5",
     })
@@ -434,6 +420,23 @@ CITY_TERMS = [
     "نصرت آباد",
     "اسپکه",
 ]
+
+
+# ============================================================
+# واژه‌های مبهم
+# ============================================================
+
+AMBIGUOUS_CITY_TERMS = {
+    "سرباز",
+    "مرز",
+    "بندر",
+    "بازار",
+    "راه",
+    "ساحل",
+    "پروژه",
+    "طرح",
+    "منطقه",
+}
 
 
 SPECIAL_LOCAL_TERMS = [
@@ -692,9 +695,7 @@ def clean_text(value):
     if not value:
         return ""
 
-    value = html.unescape(
-        str(value)
-    )
+    value = html.unescape(str(value))
 
     soup = BeautifulSoup(
         value,
@@ -717,20 +718,9 @@ def normalize_persian_text(text):
 
     text = clean_text(text)
 
-    text = text.replace(
-        "\u200c",
-        " ",
-    )
-
-    text = text.replace(
-        "\u200e",
-        "",
-    )
-
-    text = text.replace(
-        "\u200f",
-        "",
-    )
+    text = text.replace("\u200c", " ")
+    text = text.replace("\u200e", "")
+    text = text.replace("\u200f", "")
 
     replacements = {
         "ي": "ی",
@@ -832,14 +822,14 @@ def term_in(text, term):
 
 def has_any(text, terms):
 
-    normalized_text = (
-        normalize_persian_text(text)
+    normalized_text = normalize_persian_text(
+        text
     )
 
     for term in terms:
 
-        normalized_term = (
-            normalize_persian_text(term)
+        normalized_term = normalize_persian_text(
+            term
         )
 
         if term_in(
@@ -1281,14 +1271,10 @@ def save_publish_state(
 
     state = load_publish_state()
 
-    state["last_publish"] = (
-        time.time()
-    )
+    state["last_publish"] = time.time()
 
     if extra:
-        state.update(
-            extra
-        )
+        state.update(extra)
 
     with open(
         PUBLISHED_STATE_FILE,
@@ -1397,9 +1383,7 @@ def save_events(events):
         reverse=True,
     )
 
-    events = events[
-        :MAX_EVENTS_KEPT
-    ]
+    events = events[:MAX_EVENTS_KEPT]
 
     with open(
         EVENTS_FILE,
@@ -1434,9 +1418,7 @@ def make_event_id(item):
     )
 
     return hashlib.sha1(
-        base.encode(
-            "utf-8"
-        )
+        base.encode("utf-8")
     ).hexdigest()
 
 
@@ -1498,11 +1480,8 @@ def parse_date(entry):
 
         try:
 
-            dt = (
-                email.utils
-                .parsedate_to_datetime(
-                    raw
-                )
+            dt = email.utils.parsedate_to_datetime(
+                raw
             )
 
             if dt.tzinfo is None:
@@ -1576,9 +1555,7 @@ def make_summary(entry):
 # LOCATION CHECKS
 # ============================================================
 
-def other_province_in_title(
-    title
-):
+def other_province_in_title(title):
 
     t = normalize_persian_text(
         title
@@ -1590,9 +1567,22 @@ def other_province_in_title(
     ):
         return False
 
+    # شهرهای معتبر استان در عنوان
+    # باعث می‌شوند عنوان محلی تلقی شود.
+    for city in CITY_TERMS:
+
+        if city in AMBIGUOUS_CITY_TERMS:
+            continue
+
+        if term_in(
+            t,
+            normalize_persian_text(city),
+        ):
+            return False
+
     if has_any(
         t,
-        CITY_TERMS,
+        SPECIAL_LOCAL_TERMS,
     ):
         return False
 
@@ -1602,9 +1592,7 @@ def other_province_in_title(
     )
 
 
-def foreign_location_in_title(
-    title
-):
+def foreign_location_in_title(title):
 
     t = normalize_persian_text(
         title
@@ -1622,16 +1610,90 @@ def foreign_location_in_title(
     ):
         return False
 
-    if has_any(
-        t,
-        CITY_TERMS,
-    ):
-        return False
+    for city in CITY_TERMS:
+
+        if city in AMBIGUOUS_CITY_TERMS:
+            continue
+
+        if term_in(
+            t,
+            normalize_persian_text(city),
+        ):
+            return False
 
     return has_any(
         t,
         FOREIGN_LOCATION_TERMS,
     )
+
+
+# ============================================================
+# LOCAL GEOGRAPHIC SIGNALS
+# ============================================================
+
+def local_geographic_signals(
+    title,
+    summary,
+):
+
+    title_n = normalize_persian_text(
+        title
+    )
+
+    summary_n = normalize_persian_text(
+        summary
+    )
+
+    full = (
+        title_n
+        + " "
+        + summary_n
+    ).strip()
+
+    strong_province = has_any(
+        full,
+        PROVINCE_TERMS,
+    )
+
+    strong_special = has_any(
+        full,
+        SPECIAL_LOCAL_TERMS,
+    )
+
+    city_signals = []
+
+    for city in CITY_TERMS:
+
+        if city in AMBIGUOUS_CITY_TERMS:
+            continue
+
+        normalized_city = normalize_persian_text(
+            city
+        )
+
+        if term_in(
+            title_n,
+            normalized_city,
+        ):
+
+            city_signals.append(
+                ("title", city)
+            )
+
+        elif term_in(
+            summary_n,
+            normalized_city,
+        ):
+
+            city_signals.append(
+                ("summary", city)
+            )
+
+    return {
+        "province": strong_province,
+        "special": strong_special,
+        "cities": city_signals,
+    }
 
 
 # ============================================================
@@ -1650,10 +1712,8 @@ def score_terms(
 
     for term in terms:
 
-        normalized_term = (
-            normalize_persian_text(
-                term
-            )
+        normalized_term = normalize_persian_text(
+            term
         )
 
         if term_in(
@@ -1674,7 +1734,7 @@ def score_terms(
 
 
 # ============================================================
-# LOCAL SCORE
+# STRICT LOCAL SCORE
 # ============================================================
 
 def local_score(
@@ -1682,85 +1742,75 @@ def local_score(
     summary,
 ):
 
-    normalized_title = (
-        normalize_persian_text(
-            title
-        )
+    signals = local_geographic_signals(
+        title,
+        summary,
     )
-
-    normalized_summary = (
-        normalize_persian_text(
-            summary
-        )
-    )
-
-    full = (
-        normalized_title
-        + " "
-        + normalized_summary
-    ).strip()
 
     score = 0
 
-    if other_province_in_title(
-        title
-    ):
+    # استان
+    if signals["province"]:
+        score += 60
 
-        score -= 120
+    # مناطق شاخص
+    if signals["special"]:
+        score += 45
 
-    if foreign_location_in_title(
-        title
-    ):
+    # شهرهای معتبر استان
+    if signals["cities"]:
 
-        score -= 120
+        title_cities = sum(
+            1
+            for location, _
+            in signals["cities"]
+            if location == "title"
+        )
 
-    score += score_terms(
-        full,
-        normalized_title,
-        PROVINCE_TERMS,
-        45,
-        12,
-    )
+        summary_cities = sum(
+            1
+            for location, _
+            in signals["cities"]
+            if location == "summary"
+        )
 
-    score += score_terms(
-        full,
-        normalized_title,
-        CITY_TERMS,
-        20,
-        4,
-    )
+        score += min(
+            title_cities * 35,
+            70,
+        )
 
-    score += score_terms(
-        full,
-        normalized_title,
-        SPECIAL_LOCAL_TERMS,
-        32,
-        10,
-    )
+        score += min(
+            summary_cities * 15,
+            30,
+        )
 
-    score += score_terms(
-        full,
-        normalized_title,
-        CULTURE_TERMS,
-        32,
-        10,
-    )
+    full = (
+        normalize_persian_text(title)
+        + " "
+        + normalize_persian_text(summary)
+    ).strip()
 
     context_count = sum(
         1
         for term in LOCAL_CONTEXT_TERMS
         if term_in(
             full,
-            normalize_persian_text(
-                term
-            ),
+            normalize_persian_text(term),
         )
     )
 
-    score += min(
-        context_count * 5,
-        30,
-    )
+    # زمینه خبری فقط زمانی امتیاز می‌دهد
+    # که ابتدا سیگنال جغرافیایی واقعی وجود داشته باشد.
+    if (
+        signals["province"]
+        or signals["special"]
+        or signals["cities"]
+    ):
+
+        score += min(
+            context_count * 5,
+            30,
+        )
 
     return score
 
@@ -1769,9 +1819,7 @@ def local_score(
 # TITLE LOCALITY
 # ============================================================
 
-def title_locality_type(
-    title
-):
+def title_locality_type(title):
 
     t = normalize_persian_text(
         title
@@ -1789,23 +1837,48 @@ def title_locality_type(
     ):
         return "special"
 
-    if has_any(
-        t,
-        CULTURE_TERMS,
-    ):
-        return "culture"
+    for city in CITY_TERMS:
 
-    if has_any(
-        t,
-        CITY_TERMS,
-    ):
-        return "city"
+        if city in AMBIGUOUS_CITY_TERMS:
+            continue
+
+        if term_in(
+            t,
+            normalize_persian_text(city),
+        ):
+
+            return "city"
+
+    # فرهنگ فقط زمانی محلی است که
+    # خود عبارت دارای نام جغرافیایی استان باشد.
+    for culture_term in CULTURE_TERMS:
+
+        normalized_culture = (
+            normalize_persian_text(
+                culture_term
+            )
+        )
+
+        if term_in(
+            t,
+            normalized_culture,
+        ):
+
+            if (
+                "سیستان" in normalized_culture
+                or "بلوچستان" in normalized_culture
+                or "بلوچ" in normalized_culture
+                or "بلوچی" in normalized_culture
+                or "کلپورگان" in normalized_culture
+            ):
+
+                return "culture"
 
     return "none"
 
 
 # ============================================================
-# STRICT LOCAL FILTER
+# STRICT LOCAL FILTER - FINAL
 # ============================================================
 
 def is_real_local_news(
@@ -1814,48 +1887,28 @@ def is_real_local_news(
     score=None,
 ):
 
-    normalized_title = (
-        normalize_persian_text(
-            title
-        )
+    title_n = normalize_persian_text(
+        title
     )
 
-    normalized_summary = (
-        normalize_persian_text(
-            summary
-        )
+    summary_n = normalize_persian_text(
+        summary
     )
 
     full = (
-        normalized_title
+        title_n
         + " "
-        + normalized_summary
+        + summary_n
     ).strip()
 
-    if other_province_in_title(
-        title
-    ):
-
-        return (
-            False,
-            "other province in title",
-        )
-
-    if foreign_location_in_title(
-        title
-    ):
-
-        return (
-            False,
-            "foreign location in title",
-        )
+    # --------------------------------------------------------
+    # 1. اخبار عمومی نامرتبط
+    # --------------------------------------------------------
 
     for term in GENERAL_EXCLUDE_TERMS:
 
-        normalized_term = (
-            normalize_persian_text(
-                term
-            )
+        normalized_term = normalize_persian_text(
+            term
         )
 
         if term_in(
@@ -1868,37 +1921,59 @@ def is_real_local_news(
                 f"general exclude: {term}",
             )
 
-    has_province = has_any(
-        full,
-        PROVINCE_TERMS,
+    # --------------------------------------------------------
+    # 2. استان دیگر در عنوان
+    # --------------------------------------------------------
+
+    if other_province_in_title(title):
+
+        return (
+            False,
+            "other province in title",
+        )
+
+    # --------------------------------------------------------
+    # 3. مکان خارجی در عنوان
+    # --------------------------------------------------------
+
+    if foreign_location_in_title(title):
+
+        return (
+            False,
+            "foreign location in title",
+        )
+
+    # --------------------------------------------------------
+    # 4. سیگنال جغرافیایی
+    # --------------------------------------------------------
+
+    signals = local_geographic_signals(
+        title,
+        summary,
     )
 
-    has_city = has_any(
-        full,
-        CITY_TERMS,
-    )
+    has_province = signals["province"]
+    has_special = signals["special"]
+    cities = signals["cities"]
 
-    has_special = has_any(
-        full,
-        SPECIAL_LOCAL_TERMS,
-    )
-
-    has_culture = has_any(
-        full,
-        CULTURE_TERMS,
-    )
+    # --------------------------------------------------------
+    # 5. هیچ سیگنال محلی واقعی
+    # --------------------------------------------------------
 
     if not (
         has_province
-        or has_city
         or has_special
-        or has_culture
+        or cities
     ):
 
         return (
             False,
-            "no local signal",
+            "NO_STRONG_SISTAN_BALUCHISTAN_SIGNAL",
         )
+
+    # --------------------------------------------------------
+    # 6. امتیاز
+    # --------------------------------------------------------
 
     if score is None:
 
@@ -1907,111 +1982,155 @@ def is_real_local_news(
             summary,
         )
 
-    title_type = title_locality_type(
-        title
-    )
+    # --------------------------------------------------------
+    # 7. نام استان
+    # --------------------------------------------------------
 
-    if title_type == "province":
+    if has_province:
 
-        if score < MIN_PROVINCE_SCORE:
+        # اگر استان فقط در خلاصه و حاشیه‌ای آمده باشد
+        # باید زمینه خبری هم وجود داشته باشد.
+
+        province_in_title = has_any(
+            title_n,
+            PROVINCE_TERMS,
+        )
+
+        if province_in_title:
+
+            if score < MIN_PROVINCE_SCORE:
+
+                return (
+                    False,
+                    f"province score too low: {score}",
+                )
 
             return (
-                False,
-                f"province score too low: {score}",
+                True,
+                "SISTAN_BALUCHISTAN_PROVINCE_TITLE",
+            )
+
+        # استان فقط در خلاصه
+        context_count = sum(
+            1
+            for term in LOCAL_CONTEXT_TERMS
+            if term_in(
+                full,
+                normalize_persian_text(term),
+            )
+        )
+
+        if (
+            context_count >= 2
+            and score >= 40
+        ):
+
+            return (
+                True,
+                "SISTAN_BALUCHISTAN_PROVINCE_CONTEXT",
             )
 
         return (
-            True,
-            "province title",
+            False,
+            "PROVINCE_ONLY_IN_BODY_WITHOUT_CONTEXT",
         )
 
-    if title_type == "special":
+    # --------------------------------------------------------
+    # 8. مناطق خاص
+    # --------------------------------------------------------
+
+    if has_special:
 
         if score < MIN_SPECIAL_SCORE:
 
             return (
                 False,
-                f"special score too low: {score}",
+                f"special local signal too weak: {score}",
             )
 
-        return (
-            True,
-            "special local title",
+        # منطقه خاص باید همراه با محتوای خبری مرتبط باشد.
+        context_count = sum(
+            1
+            for term in LOCAL_CONTEXT_TERMS
+            if term_in(
+                full,
+                normalize_persian_text(term),
+            )
         )
 
-    if title_type == "culture":
-
-        if score < 25:
+        if context_count < 1:
 
             return (
                 False,
-                f"culture score too low: {score}",
+                "special location without news context",
             )
 
         return (
             True,
-            "culture title",
+            "SISTAN_BALUCHISTAN_SPECIAL_AREA",
         )
 
-    if title_type == "city":
+    # --------------------------------------------------------
+    # 9. شهر مشخص
+    # --------------------------------------------------------
+
+    if cities:
+
+        title_city_count = sum(
+            1
+            for location, _
+            in cities
+            if location == "title"
+        )
+
+        summary_city_count = sum(
+            1
+            for location, _
+            in cities
+            if location == "summary"
+        )
 
         context_count = sum(
             1
             for term in LOCAL_CONTEXT_TERMS
             if term_in(
                 full,
-                normalize_persian_text(
-                    term
-                ),
+                normalize_persian_text(term),
             )
         )
 
-        if context_count == 0:
-
-            if not (
-                has_province
-                or has_special
-                or has_culture
-            ):
-
-                return (
-                    False,
-                    "city without local context",
-                )
-
-        if score < MIN_CITY_SCORE:
+        # شهر در عنوان + حداقل یک زمینه خبری
+        if (
+            title_city_count > 0
+            and context_count >= 1
+            and score >= MIN_CITY_SCORE
+        ):
 
             return (
-                False,
-                f"city score too low: {score}",
+                True,
+                "SISTAN_BALUCHISTAN_CITY_TITLE",
+            )
+
+        # شهر فقط در متن + حداقل دو زمینه خبری
+        if (
+            summary_city_count > 0
+            and context_count >= 2
+            and score >= MIN_CITY_SCORE
+        ):
+
+            return (
+                True,
+                "SISTAN_BALUCHISTAN_CITY_CONTEXT",
             )
 
         return (
-            True,
-            "city title",
-        )
-
-    if not (
-        has_province
-        or has_special
-        or has_culture
-    ):
-
-        return (
             False,
-            "weak body local context",
-        )
-
-    if score < 30:
-
-        return (
-            False,
-            f"body local score too low: {score}",
+            "CITY_WITHOUT_SUFFICIENT_LOCAL_CONTEXT",
         )
 
     return (
-        True,
-        "body local signal",
+        False,
+        "LOCALITY_NOT_CONFIRMED",
     )
 
 
@@ -2128,13 +2247,9 @@ def distinctive_words(text):
         if len(word) < 3:
             continue
 
-        result.append(
-            word
-        )
+        result.append(word)
 
-    return set(
-        result
-    )
+    return set(result)
 
 
 def distinctive_similarity(
@@ -2186,10 +2301,6 @@ def event_similarity(
         "",
     )
 
-    # --------------------------------------------------------
-    # عنوان
-    # --------------------------------------------------------
-
     title_score = max(
         sequence_similarity(
             title_a,
@@ -2200,10 +2311,6 @@ def event_similarity(
             title_b,
         ),
     )
-
-    # --------------------------------------------------------
-    # خلاصه
-    # --------------------------------------------------------
 
     summary_score = max(
         jaccard_similarity(
@@ -2216,49 +2323,21 @@ def event_similarity(
         ),
     )
 
-    # --------------------------------------------------------
-    # واژه‌های متمایز
-    # --------------------------------------------------------
-
-    distinctive_score = (
-        distinctive_similarity(
-            title_a
-            + " "
-            + summary_a,
-            title_b
-            + " "
-            + summary_b,
-        )
+    distinctive_score = distinctive_similarity(
+        title_a + " " + summary_a,
+        title_b + " " + summary_b,
     )
 
-    # --------------------------------------------------------
-    # شباهت کاراکتری
-    # --------------------------------------------------------
-
-    character_score = (
-        sequence_similarity(
-            title_a
-            + " "
-            + summary_a,
-            title_b
-            + " "
-            + summary_b,
-        )
+    character_score = sequence_similarity(
+        title_a + " " + summary_a,
+        title_b + " " + summary_b,
     )
-
-    # --------------------------------------------------------
-    # امتیاز نهایی
-    # --------------------------------------------------------
 
     final_score = (
-        title_score
-        * TITLE_WEIGHT
-        + summary_score
-        * SUMMARY_WEIGHT
-        + distinctive_score
-        * DISTINCTIVE_WEIGHT
-        + character_score
-        * CHARACTER_WEIGHT
+        title_score * TITLE_WEIGHT
+        + summary_score * SUMMARY_WEIGHT
+        + distinctive_score * DISTINCTIVE_WEIGHT
+        + character_score * CHARACTER_WEIGHT
     )
 
     return round(
@@ -2302,20 +2381,16 @@ def event_matches(
             )
         )
 
-        item_timestamp = (
-            item["published"]
-            .timestamp()
-        )
+        item_timestamp = item[
+            "published"
+        ].timestamp()
 
         distance_hours = abs(
             item_timestamp
             - published_at
         ) / 3600
 
-        if (
-            distance_hours
-            > EVENT_MAX_AGE_HOURS
-        ):
+        if distance_hours > EVENT_MAX_AGE_HOURS:
 
             return (
                 False,
@@ -2339,16 +2414,10 @@ def event_matches(
         ),
     }
 
-    score, details = (
-        event_similarity(
-            item,
-            reference,
-        )
+    score, details = event_similarity(
+        item,
+        reference,
     )
-
-    # --------------------------------------------------------
-    # امتیاز خیلی بالا
-    # --------------------------------------------------------
 
     if score >= EVENT_DUPLICATE_THRESHOLD:
 
@@ -2359,46 +2428,33 @@ def event_matches(
             "duplicate event",
         )
 
-    # --------------------------------------------------------
-    # امتیاز متوسط
-    # --------------------------------------------------------
-
     if score >= EVENT_PROBABLE_THRESHOLD:
 
-        # اگر شهر/استان/کلیدواژه اصلی
-        # نیز مشترک باشد، تکراری محسوب می‌شود.
-
-        item_tokens = (
-            distinctive_words(
-                item["title"]
-                + " "
-                + item["summary"]
-            )
+        item_tokens = distinctive_words(
+            item["title"]
+            + " "
+            + item["summary"]
         )
 
-        event_tokens = (
-            distinctive_words(
-                event.get(
-                    "title",
-                    "",
-                )
-                + " "
-                + event.get(
-                    "summary",
-                    "",
-                )
+        event_tokens = distinctive_words(
+            event.get(
+                "title",
+                "",
+            )
+            + " "
+            + event.get(
+                "summary",
+                "",
             )
         )
 
         overlap = (
             len(
-                item_tokens
-                & event_tokens
+                item_tokens & event_tokens
             )
             / max(
                 len(
-                    item_tokens
-                    | event_tokens
+                    item_tokens | event_tokens
                 ),
                 1,
             )
@@ -2432,15 +2488,9 @@ def cluster_candidates(
 
     clusters = []
 
-    # --------------------------------------------------------
-    # ابتدا خبرهای جدید را بر اساس شباهت
-    # به گروه‌های داخلی تقسیم می‌کنیم.
-    # --------------------------------------------------------
-
     for item in candidates:
 
         assigned = False
-
         best_cluster = None
         best_score = 0
 
@@ -2448,11 +2498,9 @@ def cluster_candidates(
 
             reference = cluster[0]
 
-            score, _ = (
-                event_similarity(
-                    item,
-                    reference,
-                )
+            score, _ = event_similarity(
+                item,
+                reference,
             )
 
             if score > best_score:
@@ -2462,8 +2510,7 @@ def cluster_candidates(
 
         if (
             best_cluster is not None
-            and best_score
-            >= EVENT_PROBABLE_THRESHOLD
+            and best_score >= EVENT_PROBABLE_THRESHOLD
         ):
 
             best_cluster.append(
@@ -2484,15 +2531,11 @@ def cluster_candidates(
                 [item]
             )
 
-    # --------------------------------------------------------
-    # هر گروه یک event candidate است.
-    # --------------------------------------------------------
-
     return clusters
 
 
 # ============================================================
-# BEST VERSION OF EVENT
+# BEST VERSION
 # ============================================================
 
 def candidate_quality(item):
@@ -2514,13 +2557,11 @@ def candidate_quality(item):
         )
     )
 
-    # وجود خلاصه کامل‌تر امتیاز می‌دهد
     summary_quality = min(
         summary_length / 250,
         1.0,
     ) * 15
 
-    # نسخه نهایی
     return (
         local
         + fresh
@@ -2555,8 +2596,7 @@ def select_best_version(
 
         log.info(
             "EVENT GROUP "
-            f"contains {len(cluster)} "
-            "sources:"
+            f"contains {len(cluster)} sources:"
         )
 
         for candidate in ranked:
@@ -2726,17 +2766,11 @@ def collect_news():
                     "source_domain": source_domain,
                 })
 
-    # --------------------------------------------------------
-    # حذف لینک‌های تکراری
-    # --------------------------------------------------------
-
     unique = {}
 
     for item in items:
 
-        unique[
-            item["link"]
-        ] = item
+        unique[item["link"]] = item
 
     news = sorted(
         unique.values(),
@@ -2744,9 +2778,7 @@ def collect_news():
         reverse=True,
     )
 
-    return news[
-        :MAX_CANDIDATES
-    ]
+    return news[:MAX_CANDIDATES]
 
 
 # ============================================================
@@ -2823,19 +2855,18 @@ def prepare_candidates(
             item["summary"],
         )
 
-        valid, reason = (
-            is_real_local_news(
-                item["title"],
-                item["summary"],
-                local,
-            )
+        valid, reason = is_real_local_news(
+            item["title"],
+            item["summary"],
+            local,
         )
 
         if not valid:
 
             log.info(
-                "SKIP LOCAL FILTER "
-                f"[{reason}]: "
+                "FILTERED "
+                f"[{reason}] "
+                f"score={local}: "
                 f"{item['title']}"
             )
 
@@ -2861,7 +2892,7 @@ def prepare_candidates(
 
 
 # ============================================================
-# REMOVE EVENTS ALREADY PUBLISHED
+# REMOVE PUBLISHED EVENTS
 # ============================================================
 
 def remove_published_events(
@@ -2956,23 +2987,19 @@ def select_best_event(
 
     for cluster in clusters:
 
-        selected = (
-            select_best_version(
-                cluster
-            )
+        selected = select_best_version(
+            cluster
         )
 
         selected = dict(
             selected
         )
 
-        selected[
-            "event_size"
-        ] = len(cluster)
+        selected["event_size"] = len(
+            cluster
+        )
 
-        selected[
-            "event_sources"
-        ] = list({
+        selected["event_sources"] = list({
             x["source"]
             for x in cluster
         })
@@ -2980,10 +3007,6 @@ def select_best_event(
         event_versions.append(
             selected
         )
-
-    # --------------------------------------------------------
-    # انتخاب بهترین رویداد برای انتشار
-    # --------------------------------------------------------
 
     event_versions.sort(
         key=lambda item: (
@@ -2995,9 +3018,7 @@ def select_best_event(
                 "freshness",
                 0,
             ),
-            candidate_quality(
-                item
-            ),
+            candidate_quality(item),
             item["published"],
         ),
         reverse=True,
@@ -3020,18 +3041,10 @@ def register_published_event(
         "event_id": make_event_id(
             item
         ),
-        "title": item[
-            "title"
-        ],
-        "summary": item[
-            "summary"
-        ],
-        "link": item[
-            "link"
-        ],
-        "source": item[
-            "source"
-        ],
+        "title": item["title"],
+        "summary": item["summary"],
+        "link": item["link"],
+        "source": item["source"],
         "sources": item.get(
             "event_sources",
             [
@@ -3100,25 +3113,17 @@ def get_og_image(
 
             if (
                 tag
-                and tag.get(
-                    "content"
-                )
+                and tag.get("content")
             ):
 
-                image = (
-                    tag[
-                        "content"
-                    ].strip()
+                image = tag[
+                    "content"
+                ].strip()
+
+                image = urljoin(
+                    url,
+                    image,
                 )
-
-                if image.startswith(
-                    "//"
-                ):
-
-                    image = (
-                        "https:"
-                        + image
-                    )
 
                 return image
 
@@ -3148,13 +3153,11 @@ def safe_cut(
         return text
 
     if max_length <= 3:
-        return text[
-            :max_length
-        ]
+        return text[:max_length]
 
     shortened = (
         text[
-            : max_length - 3
+            :max_length - 3
         ]
         .rsplit(
             " ",
@@ -3169,18 +3172,14 @@ def safe_cut(
 # MESSAGE
 # ============================================================
 
-def build_message(
-    item
-):
+def build_message(item):
 
+    # عنوان استان دیگر به ابتدای پیام اضافه نمی‌شود.
     text = (
-        "🚨 استان سیستان و بلوچستان\n\n"
         f"📰 {item['title']}\n\n"
     )
 
-    if item.get(
-        "summary"
-    ):
+    if item.get("summary"):
 
         text += (
             item["summary"]
@@ -3254,9 +3253,7 @@ def bale_api(
 
     result = response.json()
 
-    if not result.get(
-        "ok"
-    ):
+    if not result.get("ok"):
 
         raise RuntimeError(
             result
@@ -3295,11 +3292,9 @@ def publish_item(
 
             try:
 
-                image_response = (
-                    SESSION.get(
-                        image_url,
-                        timeout=12,
-                    )
+                image_response = SESSION.get(
+                    image_url,
+                    timeout=12,
                 )
 
                 image_response.raise_for_status()
@@ -3322,8 +3317,7 @@ def publish_item(
                     content_type.startswith(
                         "image/"
                     )
-                    and image_size
-                    < 5_000_000
+                    and image_size < 5_000_000
                 ):
 
                     bale_api(
@@ -3395,12 +3389,15 @@ def publish_item(
 
 def main():
 
+    log.info("=" * 70)
+
     log.info(
-        "=" * 70
+        "JAHANTAB | جهان‌تاب v9.1 START"
     )
 
     log.info(
-        "JAHANTAB | جهان‌تاب v9.0 START"
+        "STRICT Sistan & Baluchestan "
+        "geographic filtering ENABLED"
     )
 
     log.info(
@@ -3408,8 +3405,10 @@ def main():
     )
 
     log.info(
-        "=" * 70
+        "Publish interval: 30 minutes"
     )
+
+    log.info("=" * 70)
 
     if not acquire_lock():
 
@@ -3437,17 +3436,11 @@ def main():
         # LOAD STATE
         # ----------------------------------------------------
 
-        sent_links = (
-            load_sent_links()
-        )
+        sent_links = load_sent_links()
 
-        sent_titles = (
-            load_sent_titles()
-        )
+        sent_titles = load_sent_titles()
 
-        published_events = (
-            load_events()
-        )
+        published_events = load_events()
 
         log.info(
             f"Known links: "
@@ -3494,33 +3487,32 @@ def main():
         )
 
         log.info(
-            f"Local candidates: "
+            f"Strict local candidates: "
             f"{len(candidates)}"
         )
 
         if not candidates:
 
             log.info(
-                "No suitable local candidates"
+                "No suitable Sistan & "
+                "Baluchestan candidates"
             )
 
             return
 
         # ----------------------------------------------------
-        # EVENT DEDUP AGAINST PREVIOUSLY
-        # PUBLISHED EVENTS
+        # EVENT DEDUP
         # ----------------------------------------------------
 
-        candidates = (
-            remove_published_events(
-                candidates,
-                published_events,
-            )
+        candidates = remove_published_events(
+            candidates,
+            published_events,
         )
 
         log.info(
-            "Candidates after published-event "
-            f"dedup: {len(candidates)}"
+            "Candidates after "
+            "published-event dedup: "
+            f"{len(candidates)}"
         )
 
         if not candidates:
@@ -3552,9 +3544,7 @@ def main():
         # LOG EVENT
         # ----------------------------------------------------
 
-        log.info(
-            "=" * 70
-        )
+        log.info("=" * 70)
 
         log.info(
             "SELECTED EVENT"
@@ -3566,6 +3556,11 @@ def main():
 
         log.info(
             f"Source: {selected['source']}"
+        )
+
+        log.info(
+            f"Filter reason: "
+            f"{selected.get('filter_reason', '')}"
         )
 
         log.info(
@@ -3588,9 +3583,35 @@ def main():
             f"{selected.get('event_sources', [])}"
         )
 
-        log.info(
-            "=" * 70
+        log.info("=" * 70)
+
+        # ----------------------------------------------------
+        # FINAL SAFETY CHECK
+        # ----------------------------------------------------
+
+        final_valid, final_reason = (
+            is_real_local_news(
+                selected["title"],
+                selected["summary"],
+                selected.get(
+                    "local_score",
+                    0,
+                ),
+            )
         )
+
+        if not final_valid:
+
+            log.error(
+                "FINAL SAFETY FILTER BLOCKED NEWS: "
+                f"{selected['title']}"
+            )
+
+            log.error(
+                f"Reason: {final_reason}"
+            )
+
+            return
 
         # ----------------------------------------------------
         # PUBLISH
@@ -3661,17 +3682,27 @@ def main():
                 "last_event_sources": selected.get(
                     "event_sources",
                     [
-                        selected[
-                            "source"
-                        ]
+                        selected["source"]
                     ],
                 ),
             }
         )
 
-        log.info(
-            "=" * 70
+        # ----------------------------------------------------
+        # PRUNE
+        # ----------------------------------------------------
+
+        prune_file(
+            STATE_FILE,
+            5000,
         )
+
+        prune_file(
+            TITLES_FILE,
+            MAX_TITLES_KEPT,
+        )
+
+        log.info("=" * 70)
 
         log.info(
             "SUCCESS"
@@ -3685,9 +3716,7 @@ def main():
             "Link + title + event state saved."
         )
 
-        log.info(
-            "=" * 70
-        )
+        log.info("=" * 70)
 
     except Exception as exc:
 
