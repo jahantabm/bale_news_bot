@@ -1,163 +1,64 @@
 # -*- coding: utf-8 -*-
+
 """
-============================================================
 JAHANTAB | جهان‌تاب
-رصدخانه خبری سیستان و بلوچستان
-نسخه نهایی v9.1 - STRICT LOCAL FILTER
-============================================================
+Telegram -> Bale Mirror
 
-ARCHITECTURE
-------------------------------------------------------------
-RSS
- ↓
-Source Validation
- ↓
-Geographic Filter
- ↓
-Irrelevant-News Filter
- ↓
-Duplicate-Link Filter
- ↓
-Duplicate-Title Filter
- ↓
-Event Similarity
- ↓
-Event Clustering
- ↓
-Best Version Selection
- ↓
-Local Scoring
- ↓
-Freshness Scoring
- ↓
-Publish
+هر چیزی که در کانال تلگرام @jahantab_news منتشر شود:
+- متن
+- عکس
+- ویدئو
+- آهنگ / Audio
+- Voice
+- فایل / Document
+- GIF / Animation
 
-ویژگی‌های نسخه v9.1:
+به کانال بله منتقل می‌شود.
 
-- فقط منابع داخلی و شناخته‌شده ایرانی
-- تمرکز سخت‌گیرانه بر سیستان و بلوچستان
-- عدم پذیرش خبر عمومی ایران
-- عدم پذیرش خبر خارجی
-- عدم پذیرش خبرهای سینمایی، ورزشی و سرگرمی
-- عدم پذیرش واژه‌های مبهم به‌عنوان مکان
-- واژه «سرباز» به‌تنهایی مکان محسوب نمی‌شود
-- نام شهر به‌تنهایی کافی نیست
-- اشاره حاشیه‌ای به استان کافی نیست
-- حذف لینک تکراری
-- حذف عنوان تکراری
-- تشخیص رویدادهای یکسان از چند خبرگزاری
-- گروه‌بندی خبرهای مربوط به یک رویداد
-- انتخاب بهترین نسخه خبر
-- جلوگیری از انتشار مجدد همان رویداد
-- Event Similarity چندمعیاره
-- RSS date
-- email.utils fallback
-- freshness scoring
-- SequenceMatcher
-- Jaccard
-- distinctive-word similarity
-- PID-safe lock
-- state persistence
-- automatic pruning
-- OG image
-- sendPhoto fallback
-- sendMessage fallback
-- لاگ کامل علت رد خبر
-============================================================
+هیچ RSS یا تولید خبر مستقلی در این نسخه وجود ندارد.
 """
 
 import os
-import re
 import json
-import html
 import time
-import calendar
-import email.utils
 import logging
-import difflib
-import hashlib
-
-from datetime import datetime, timezone, timedelta
-from urllib.parse import urlparse, urljoin
+import tempfile
+from pathlib import Path
 
 import requests
-import feedparser
-
-from bs4 import BeautifulSoup
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 
 # ============================================================
 # CONFIG
 # ============================================================
 
-BOT_TOKEN = os.getenv("BALE_BOT_TOKEN")
-CHAT_ID = os.getenv("BALE_CHAT_ID")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+BALE_BOT_TOKEN = os.getenv("BALE_BOT_TOKEN")
+BALE_CHAT_ID = os.getenv("BALE_CHAT_ID")
 
-STATE_FILE = "sent_links.txt"
-TITLES_FILE = "sent_titles.txt"
-PUBLISHED_STATE_FILE = "published_state.json"
-EVENTS_FILE = "published_events.json"
+TELEGRAM_CHANNEL_USERNAME = os.getenv(
+    "TELEGRAM_CHANNEL_USERNAME",
+    "jahantab_news"
+).lstrip("@").lower()
 
-LOCK_FILE = "jahantab.lock"
+OFFSET_FILE = "telegram_offset.json"
 
-# ============================================================
-# انتشار حداکثر هر ۳۰ دقیقه
-# ============================================================
-
-PUBLISH_INTERVAL_MINUTES = 30
-
-# فقط خبرهای حداکثر 24 ساعت گذشته
-MAX_NEWS_AGE_HOURS = 24
-
-MAX_CANDIDATES = 1000
-
-MAX_CAPTION_LEN = 1000
-MAX_TEXT_LEN = 3900
-
-MAX_TITLES_KEPT = 500
-
-# ============================================================
-# EVENT DUPLICATION
-# ============================================================
-
-EVENT_DUPLICATE_THRESHOLD = 82
-EVENT_PROBABLE_THRESHOLD = 68
-EVENT_MAX_AGE_HOURS = 72
-
-# ============================================================
-# EVENT WEIGHTS
-# ============================================================
-
-TITLE_WEIGHT = 0.25
-SUMMARY_WEIGHT = 0.35
-DISTINCTIVE_WEIGHT = 0.25
-CHARACTER_WEIGHT = 0.15
-
-# ============================================================
-# FRESHNESS
-# ============================================================
-
-FRESHNESS_HOURS = 24
-
-# ============================================================
-# LOCAL MINIMUM SCORES
-# ============================================================
-
-MIN_CITY_SCORE = 30
-MIN_PROVINCE_SCORE = 35
-MIN_SPECIAL_SCORE = 35
-
-# ============================================================
-# STATE LIMITS
-# ============================================================
-
-MAX_EVENTS_KEPT = 600
+TELEGRAM_API = "https://api.telegram.org/bot"
+TELEGRAM_FILE_API = "https://api.telegram.org/file/bot"
+BALE_API = "https://tapi.bale.ai/bot"
 
 TELEGRAM_URL = "https://t.me/jahantab_news"
 BALE_URL = "https://ble.ir/jahantabnews"
 SOROUSH_URL = "https://splus.ir/jahantabnews"
+
+TIMEOUT = 90
+
+# Telegram getUpdates
+MAX_UPDATES = 100
+
+# Bale text/caption safe limits
+BALE_TEXT_LIMIT = 3900
+BALE_CAPTION_LIMIT = 950
 
 
 # ============================================================
@@ -166,3221 +67,974 @@ SOROUSH_URL = "https://splus.ir/jahantabnews"
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
+    format="%(asctime)s | %(levelname)s | %(message)s"
 )
 
-log = logging.getLogger("jahantab")
-
-
-if not BOT_TOKEN:
-    raise RuntimeError("BALE_BOT_TOKEN is not set")
-
-if not CHAT_ID:
-    raise RuntimeError("BALE_CHAT_ID is not set")
+log = logging.getLogger("JAHANTAB-BRIDGE")
 
 
 # ============================================================
 # HTTP SESSION
 # ============================================================
 
-def build_session():
+session = requests.Session()
 
-    session = requests.Session()
-
-    session.headers.update({
-        "User-Agent": (
-            "Mozilla/5.0 (X11; Linux x86_64) "
-            "AppleWebKit/537.36 "
-            "(KHTML, like Gecko) "
-            "Chrome/120.0 Safari/537.36 "
-            "JahantabBot/9.1"
-        ),
-        "Accept-Language": "fa-IR,fa;q=0.9,en;q=0.5",
-    })
-
-    retry = Retry(
-        total=3,
-        backoff_factor=0.8,
-        status_forcelist=[
-            429,
-            500,
-            502,
-            503,
-            504,
-        ],
-        allowed_methods=[
-            "GET",
-            "POST",
-        ],
-        raise_on_status=False,
-    )
-
-    adapter = HTTPAdapter(
-        max_retries=retry,
-        pool_connections=12,
-        pool_maxsize=24,
-    )
-
-    session.mount(
-        "http://",
-        adapter,
-    )
-
-    session.mount(
-        "https://",
-        adapter,
-    )
-
-    return session
-
-
-SESSION = build_session()
+session.headers.update({
+    "User-Agent": "JAHANTAB-Telegram-Bale-Bridge/2.0"
+})
 
 
 # ============================================================
-# SOURCES
+# VALIDATION
 # ============================================================
 
-SOURCES = [
+def validate_config():
+    missing = []
 
-    (
-        "ایرنا",
-        "irna.ir",
-        [
-            "https://www.irna.ir/rss",
-        ],
-    ),
+    if not TELEGRAM_BOT_TOKEN:
+        missing.append("TELEGRAM_BOT_TOKEN")
 
-    (
-        "ایسنا",
-        "isna.ir",
-        [
-            "https://www.isna.ir/rss",
-        ],
-    ),
+    if not BALE_BOT_TOKEN:
+        missing.append("BALE_BOT_TOKEN")
 
-    (
-        "مهر",
-        "mehrnews.com",
-        [
-            "https://www.mehrnews.com/rss",
-        ],
-    ),
+    if not BALE_CHAT_ID:
+        missing.append("BALE_CHAT_ID")
 
-    (
-        "فارس",
-        "farsnews.ir",
-        [
-            "https://www.farsnews.ir/rss",
-        ],
-    ),
-
-    (
-        "ایلنا",
-        "ilna.ir",
-        [
-            "https://www.ilna.ir/rss",
-        ],
-    ),
-
-    (
-        "تسنیم",
-        "tasnimnews.com",
-        [
-            (
-                "https://www.tasnimnews.com/fa/rss/feed/"
-                "0/8/0/مهمترین-اخبار-تسنیم"
-            ),
-        ],
-    ),
-
-    (
-        "خبرگزاری صداوسیما",
-        "iribnews.ir",
-        [
-            "https://www.iribnews.ir/fa/rss",
-        ],
-    ),
-
-    (
-        "باشگاه خبرنگاران جوان",
-        "yjc.ir",
-        [
-            "https://www.yjc.ir/fa/rss/allnews",
-        ],
-    ),
-
-    (
-        "تابناک",
-        "tabnak.ir",
-        [
-            "https://www.tabnak.ir/fa/rss/allnews",
-        ],
-    ),
-
-    (
-        "خبرآنلاین",
-        "khabaronline.ir",
-        [
-            "https://www.khabaronline.ir/rss",
-        ],
-    ),
-
-    (
-        "همشهری",
-        "hamshahrionline.ir",
-        [
-            "https://www.hamshahrionline.ir/rss",
-        ],
-    ),
-
-    (
-        "جام جم",
-        "jamejamonline.ir",
-        [
-            "https://jamejamonline.ir/rss",
-        ],
-    ),
-
-    (
-        "انتخاب",
-        "entekhab.ir",
-        [
-            "https://www.entekhab.ir/fa/rss",
-        ],
-    ),
-]
-
-
-# ============================================================
-# BLOCKED DOMAINS
-# ============================================================
-
-BLOCKED_DOMAINS = {
-    "google.com",
-    "news.google.com",
-    "youtube.com",
-    "youtu.be",
-    "facebook.com",
-    "fb.com",
-    "instagram.com",
-    "x.com",
-    "twitter.com",
-    "t.co",
-    "telegram.me",
-    "t.me",
-    "aparat.com",
-}
-
-
-# ============================================================
-# LOCAL TERMS
-# ============================================================
-
-PROVINCE_TERMS = [
-    "سیستان و بلوچستان",
-    "استان سیستان و بلوچستان",
-]
-
-
-CITY_TERMS = [
-    "زاهدان",
-    "زابل",
-    "چابهار",
-    "سراوان",
-    "ایرانشهر",
-    "خاش",
-    "نیکشهر",
-    "کنارک",
-    "راسک",
-    "دلگان",
-    "میرجاوه",
-    "زهک",
-    "هیرمند",
-    "هامون",
-    "فنوج",
-    "سرباز",
-    "قصرقند",
-    "بزمان",
-    "بمپور",
-    "دشتیاری",
-    "مهرستان",
-    "سیب و سوران",
-    "نیمروز",
-    "پیشین",
-    "تفتان",
-    "ادیمی",
-    "محمدان",
-    "نوک آباد",
-    "پارود",
-    "زرآباد",
-    "لاشار",
-    "آهوران",
-    "کورین",
-    "نصرت آباد",
-    "اسپکه",
-]
-
-
-# ============================================================
-# واژه‌های مبهم
-# ============================================================
-
-AMBIGUOUS_CITY_TERMS = {
-    "سرباز",
-    "مرز",
-    "بندر",
-    "بازار",
-    "راه",
-    "ساحل",
-    "پروژه",
-    "طرح",
-    "منطقه",
-}
-
-
-SPECIAL_LOCAL_TERMS = [
-    "تالاب هامون",
-    "تالاب بین المللی هامون",
-    "رودخانه هیرمند",
-    "رود هیرمند",
-    "حقابه هیرمند",
-    "حقابه ایران",
-    "آب هیرمند",
-    "جازموریان",
-    "تالاب جازموریان",
-    "مکران",
-    "سواحل مکران",
-    "ساحل مکران",
-    "دریای عمان",
-    "سواحل دریای عمان",
-    "ساحل دریای عمان",
-    "بندر چابهار",
-    "منطقه آزاد چابهار",
-]
-
-
-CULTURE_TERMS = [
-    "فرهنگ سیستان و بلوچستان",
-    "فرهنگ سیستان",
-    "فرهنگ بلوچستان",
-    "هنر سیستان و بلوچستان",
-    "هنر سیستان",
-    "هنر بلوچستان",
-    "موسیقی سیستان و بلوچستان",
-    "موسیقی سیستان",
-    "موسیقی بلوچستان",
-    "موسیقی بلوچی",
-    "موسیقی محلی سیستان",
-    "موسیقی محلی بلوچستان",
-    "هنرمندان سیستان و بلوچستان",
-    "هنرمندان بلوچستان",
-    "هنرمند سیستانی",
-    "هنرمند بلوچ",
-    "فرهنگ بلوچ",
-    "فرهنگ بلوچی",
-    "میراث فرهنگی سیستان و بلوچستان",
-    "سفال کلپورگان",
-    "کلپورگان",
-    "سوزن دوزی بلوچ",
-    "لباس بلوچی",
-    "لباس محلی بلوچستان",
-    "رقص محلی بلوچستان",
-    "موسیقی مقامی",
-    "جشنواره فرهنگی",
-    "جشنواره هنری",
-    "نمایشگاه هنری",
-    "رویداد فرهنگی",
-    "آیین های سنتی",
-    "آیین سنتی",
-    "ادبیات بلوچستان",
-    "شعر بلوچی",
-    "شاعر بلوچ",
-]
-
-
-LOCAL_CONTEXT_TERMS = [
-    "استاندار",
-    "استانداری",
-    "معاون استاندار",
-    "فرماندار",
-    "فرمانداری",
-    "نماینده ولی فقیه",
-    "مجمع نمایندگان",
-    "نماینده مردم",
-
-    "حادثه",
-    "تصادف",
-    "آتش سوزی",
-    "زلزله",
-    "سیل",
-    "طوفان",
-    "بارندگی",
-
-    "کشف",
-    "قاچاق",
-    "توقیف",
-    "دستگیری",
-    "بازداشت",
-    "فوت",
-    "جان باخت",
-    "کشته",
-    "مصدوم",
-    "نجات",
-    "امداد",
-
-    "مأمور انتظامی",
-    "نیروی انتظامی",
-    "فراجا",
-    "پلیس",
-    "نیروهای امنیتی",
-    "نیروهای نظامی",
-    "مرزبانی",
-    "مرزبان",
-
-    "افتتاح",
-    "بهره برداری",
-    "پروژه",
-    "طرح",
-    "ساخت",
-    "توسعه",
-    "اعتبار",
-    "سرمایه گذاری",
-
-    "راه",
-    "جاده",
-    "بندر",
-    "بیمارستان",
-    "مدرسه",
-    "دانشگاه",
-    "فرودگاه",
-    "راه آهن",
-
-    "آب رسانی",
-    "برق",
-    "گاز",
-    "کشاورزی",
-    "دامداری",
-    "صیادی",
-    "ماهیگیری",
-    "شیلات",
-    "محیط زیست",
-    "خشکسالی",
-    "تنش آبی",
-
-    "اقتصاد",
-    "اشتغال",
-    "بازار",
-    "تجارت",
-    "صادرات",
-    "واردات",
-    "مرز",
-    "مرز رسمی",
-    "بازرگانی",
-    "منطقه آزاد",
-    "کشتیرانی",
-    "پتروشیمی",
-    "سواحل",
-]
-
-
-OTHER_PROVINCE_TERMS = [
-    "آذربایجان شرقی",
-    "آذربایجان غربی",
-    "اردبیل",
-    "اصفهان",
-    "البرز",
-    "ایلام",
-    "بوشهر",
-    "تهران",
-    "چهارمحال و بختیاری",
-    "خراسان جنوبی",
-    "خراسان رضوی",
-    "خراسان شمالی",
-    "خوزستان",
-    "زنجان",
-    "سمنان",
-    "فارس",
-    "قزوین",
-    "قم",
-    "کردستان",
-    "کرمان",
-    "کرمانشاه",
-    "کهگیلویه و بویراحمد",
-    "گلستان",
-    "گیلان",
-    "لرستان",
-    "مازندران",
-    "مرکزی",
-    "هرمزگان",
-    "همدان",
-    "یزد",
-]
-
-
-FOREIGN_LOCATION_TERMS = [
-    "سوریه",
-    "ترکیه",
-    "هند",
-    "عراق",
-    "لبنان",
-    "یمن",
-    "عربستان",
-    "امارات",
-    "قطر",
-    "کویت",
-    "بحرین",
-    "اردن",
-    "مصر",
-    "لیبی",
-    "تونس",
-    "الجزایر",
-    "مراکش",
-    "آمریکا",
-    "ایالات متحده",
-    "انگلیس",
-    "بریتانیا",
-    "فرانسه",
-    "آلمان",
-    "ایتالیا",
-    "اسپانیا",
-    "روسیه",
-    "اوکراین",
-    "چین",
-    "ژاپن",
-    "کره جنوبی",
-    "کره شمالی",
-    "غزه",
-    "کرانه باختری",
-    "رام الله",
-    "تل آویو",
-    "قدس",
-    "استانبول",
-    "آنکارا",
-    "دمشق",
-    "حلب",
-    "رقه",
-    "لندن",
-    "پاریس",
-    "برلین",
-    "مسکو",
-    "کی یف",
-]
-
-
-GENERAL_EXCLUDE_TERMS = [
-    "آگاتا کریستی",
-    "خانم مارپل",
-    "فال حافظ",
-    "فال روزانه",
-    "سردار آزمون",
-    "تیم ملی فوتبال",
-    "تیم ملی",
-    "فوتبال",
-    "لیگ برتر",
-    "استقلال",
-    "پرسپولیس",
-    "سلبریتی",
-    "فال",
-    "مد و زیبایی",
-]
-
-
-# ============================================================
-# TEXT NORMALIZATION
-# ============================================================
-
-def clean_text(value):
-
-    if not value:
-        return ""
-
-    value = html.unescape(str(value))
-
-    soup = BeautifulSoup(
-        value,
-        "html.parser",
-    )
-
-    value = soup.get_text(
-        " ",
-        strip=True,
-    )
-
-    return re.sub(
-        r"\s+",
-        " ",
-        value,
-    ).strip()
-
-
-def normalize_persian_text(text):
-
-    text = clean_text(text)
-
-    text = text.replace("\u200c", " ")
-    text = text.replace("\u200e", "")
-    text = text.replace("\u200f", "")
-
-    replacements = {
-        "ي": "ی",
-        "ى": "ی",
-        "ك": "ک",
-        "ۀ": "ه",
-        "ة": "ه",
-        "ؤ": "و",
-        "إ": "ا",
-        "أ": "ا",
-    }
-
-    for old, new in replacements.items():
-        text = text.replace(
-            old,
-            new,
+    if missing:
+        raise RuntimeError(
+            "Missing environment variables: "
+            + ", ".join(missing)
         )
 
-    text = re.sub(
-        r"[ًٌٍَُِّْـ]",
-        "",
-        text,
-    )
-
-    return re.sub(
-        r"\s+",
-        " ",
-        text,
-    ).strip()
-
-
-def normalize_title(text):
-
-    text = normalize_persian_text(
-        text
-    ).lower()
-
-    remove_words = [
-        "خبر",
-        "گزارش",
-        "اعلام",
-        "آخرین",
-        "واکنش",
-        "جزئیات",
-        "مهم",
-        "جدید",
-    ]
-
-    for word in remove_words:
-
-        text = re.sub(
-            rf"(?<!\w){re.escape(word)}(?!\w)",
-            " ",
-            text,
-        )
-
-    text = re.sub(
-        r"[^\w\u0600-\u06FF\s]",
-        " ",
-        text,
-    )
-
-    return re.sub(
-        r"\s+",
-        " ",
-        text,
-    ).strip()
-
-
-def tokenize(text):
-
-    text = normalize_persian_text(
-        text
-    ).lower()
-
-    text = re.sub(
-        r"[^\w\u0600-\u06FF\s]",
-        " ",
-        text,
-    )
-
-    return [
-        x
-        for x in text.split()
-        if len(x) >= 2
-    ]
-
-
-def term_in(text, term):
-
-    if not term:
-        return False
-
-    return re.search(
-        rf"(?<!\w){re.escape(term)}(?!\w)",
-        text,
-    ) is not None
-
-
-def has_any(text, terms):
-
-    normalized_text = normalize_persian_text(
-        text
-    )
-
-    for term in terms:
-
-        normalized_term = normalize_persian_text(
-            term
-        )
-
-        if term_in(
-            normalized_text,
-            normalized_term,
-        ):
-            return True
-
-    return False
-
 
 # ============================================================
-# URL
+# TELEGRAM API
 # ============================================================
 
-def normalize_url(url):
+def telegram_call(method, payload=None):
 
-    if not url:
-        return ""
+    url = (
+        f"{TELEGRAM_API}"
+        f"{TELEGRAM_BOT_TOKEN}/"
+        f"{method}"
+    )
 
-    url = str(url).strip()
-
-    url = re.sub(
-        r"[?&](utm_[^&]+|fbclid|gclid)=[^&]*",
-        "",
+    response = session.post(
         url,
+        json=payload or {},
+        timeout=TIMEOUT
     )
 
-    url = re.sub(
-        r"[?&]+$",
-        "",
-        url,
-    )
-
-    return url
-
-
-def get_domain(url):
-
-    try:
-
-        domain = (
-            urlparse(url).hostname
-            or ""
-        ).lower()
-
-        if domain.startswith("www."):
-            domain = domain[4:]
-
-        return domain
-
-    except Exception:
-        return ""
-
-
-def is_blocked_url(url):
-
-    domain = get_domain(url)
-
-    if not domain:
-        return True
-
-    if domain in BLOCKED_DOMAINS:
-        return True
-
-    return any(
-        domain.endswith(
-            "." + blocked
-        )
-        for blocked in BLOCKED_DOMAINS
-    )
-
-
-def is_allowed_source_url(
-    url,
-    source_domain,
-):
-
-    domain = get_domain(url)
-
-    if not domain:
-        return False
-
-    if is_blocked_url(url):
-        return False
-
-    return (
-        domain == source_domain
-        or domain.endswith(
-            "." + source_domain
-        )
-    )
-
-
-# ============================================================
-# LOCK
-# ============================================================
-
-def write_lock():
-
-    fd = os.open(
-        LOCK_FILE,
-        os.O_CREAT
-        | os.O_EXCL
-        | os.O_WRONLY,
-    )
-
-    with os.fdopen(
-        fd,
-        "w",
-        encoding="utf-8",
-    ) as f:
-
-        json.dump(
-            {
-                "pid": os.getpid(),
-                "time": time.time(),
-            },
-            f,
-        )
-
-
-def acquire_lock():
-
-    try:
-
-        write_lock()
-
-        return True
-
-    except FileExistsError:
-        pass
-
-    try:
-
-        with open(
-            LOCK_FILE,
-            "r",
-            encoding="utf-8",
-        ) as f:
-
-            data = json.load(f)
-
-        lock_time = float(
-            data.get(
-                "time",
-                0,
-            )
-        )
-
-        lock_pid = int(
-            data.get(
-                "pid",
-                0,
-            )
-        )
-
-    except Exception:
-
-        return False
-
-    if (
-        time.time()
-        - lock_time
-        <= 600
-    ):
-
-        return False
-
-    alive = False
-
-    try:
-
-        os.kill(
-            lock_pid,
-            0,
-        )
-
-        alive = True
-
-    except (
-        OSError,
-        ProcessLookupError,
-    ):
-
-        alive = False
-
-    if alive:
-        return False
-
-    log.warning(
-        f"Removing stale lock "
-        f"(pid={lock_pid})"
-    )
-
-    try:
-
-        os.remove(
-            LOCK_FILE
-        )
-
-    except FileNotFoundError:
-        pass
-
-    try:
-
-        write_lock()
-
-        return True
-
-    except FileExistsError:
-
-        return False
-
-
-def release_lock():
-
-    try:
-
-        if not os.path.exists(
-            LOCK_FILE
-        ):
-            return
-
-        with open(
-            LOCK_FILE,
-            "r",
-            encoding="utf-8",
-        ) as f:
-
-            data = json.load(f)
-
-        if int(
-            data.get(
-                "pid",
-                0,
-            )
-        ) != os.getpid():
-
-            return
-
-        os.remove(
-            LOCK_FILE
-        )
-
-    except Exception:
-        pass
-
-
-# ============================================================
-# STATE
-# ============================================================
-
-def prune_file(
-    path,
-    keep,
-):
-
-    try:
-
-        if not os.path.exists(
-            path
-        ):
-            return
-
-        with open(
-            path,
-            "r",
-            encoding="utf-8",
-        ) as f:
-
-            lines = [
-                line
-                for line in f
-                if line.strip()
-            ]
-
-        if len(lines) <= keep:
-            return
-
-        with open(
-            path,
-            "w",
-            encoding="utf-8",
-        ) as f:
-
-            f.writelines(
-                lines[-keep:]
-            )
-
-    except Exception as exc:
-
-        log.warning(
-            f"Prune failed for "
-            f"{path}: {exc}"
-        )
-
-
-def load_sent_links():
-
-    if not os.path.exists(
-        STATE_FILE
-    ):
-        return set()
-
-    try:
-
-        with open(
-            STATE_FILE,
-            "r",
-            encoding="utf-8",
-        ) as f:
-
-            return {
-                normalize_url(
-                    line.strip()
-                )
-                for line in f
-                if line.strip()
-            }
-
-    except Exception:
-
-        return set()
-
-
-def save_sent_link(link):
-
-    link = normalize_url(
-        link
-    )
-
-    if not link:
-        return
-
-    with open(
-        STATE_FILE,
-        "a",
-        encoding="utf-8",
-    ) as f:
-
-        f.write(
-            link + "\n"
-        )
-
-
-def load_sent_titles():
-
-    if not os.path.exists(
-        TITLES_FILE
-    ):
-        return []
-
-    try:
-
-        with open(
-            TITLES_FILE,
-            "r",
-            encoding="utf-8",
-        ) as f:
-
-            return [
-                line.strip()
-                for line in f
-                if line.strip()
-            ][-MAX_TITLES_KEPT:]
-
-    except Exception:
-
-        return []
-
-
-def save_sent_title(title):
-
-    normalized = normalize_title(
-        title
-    )
-
-    if not normalized:
-        return
-
-    with open(
-        TITLES_FILE,
-        "a",
-        encoding="utf-8",
-    ) as f:
-
-        f.write(
-            normalized + "\n"
-        )
-
-    prune_file(
-        TITLES_FILE,
-        MAX_TITLES_KEPT,
-    )
-
-
-# ============================================================
-# PUBLISHED STATE
-# ============================================================
-
-def load_publish_state():
-
-    default = {
-        "last_publish": 0
-    }
-
-    if not os.path.exists(
-        PUBLISHED_STATE_FILE
-    ):
-        return default
-
-    try:
-
-        with open(
-            PUBLISHED_STATE_FILE,
-            "r",
-            encoding="utf-8",
-        ) as f:
-
-            state = json.load(f)
-
-        if not isinstance(
-            state,
-            dict,
-        ):
-            return default
-
-        return state
-
-    except Exception:
-
-        return default
-
-
-def save_publish_state(
-    extra=None
-):
-
-    state = load_publish_state()
-
-    state["last_publish"] = time.time()
-
-    if extra:
-        state.update(extra)
-
-    with open(
-        PUBLISHED_STATE_FILE,
-        "w",
-        encoding="utf-8",
-    ) as f:
-
-        json.dump(
-            state,
-            f,
-            ensure_ascii=False,
-            indent=2,
-        )
-
-
-def can_publish():
-
-    state = load_publish_state()
-
-    try:
-
-        last_publish = float(
-            state.get(
-                "last_publish",
-                0,
-            )
-        )
-
-    except Exception:
-
-        last_publish = 0
-
-    elapsed = (
-        time.time()
-        - last_publish
-    )
-
-    required = (
-        PUBLISH_INTERVAL_MINUTES
-        * 60
-    )
-
-    if elapsed < required:
-
-        remaining = int(
-            required - elapsed
-        )
-
-        log.info(
-            f"Cooldown active: "
-            f"{remaining}s remaining"
-        )
-
-        return False
-
-    return True
-
-
-# ============================================================
-# EVENT STATE
-# ============================================================
-
-def load_events():
-
-    if not os.path.exists(
-        EVENTS_FILE
-    ):
-        return []
-
-    try:
-
-        with open(
-            EVENTS_FILE,
-            "r",
-            encoding="utf-8",
-        ) as f:
-
-            events = json.load(f)
-
-        if not isinstance(
-            events,
-            list,
-        ):
-            return []
-
-        return events
-
-    except Exception as exc:
-
-        log.warning(
-            f"Could not load events: "
-            f"{exc}"
-        )
-
-        return []
-
-
-def save_events(events):
-
-    events = sorted(
-        events,
-        key=lambda x: x.get(
-            "published_at",
-            0,
-        ),
-        reverse=True,
-    )
-
-    events = events[:MAX_EVENTS_KEPT]
-
-    with open(
-        EVENTS_FILE,
-        "w",
-        encoding="utf-8",
-    ) as f:
-
-        json.dump(
-            events,
-            f,
-            ensure_ascii=False,
-            indent=2,
-        )
-
-
-def make_event_id(item):
-
-    base = (
-        normalize_title(
-            item.get(
-                "title",
-                "",
-            )
-        )
-        + "|"
-        + normalize_persian_text(
-            item.get(
-                "summary",
-                "",
-            )
-        )[:500]
-    )
-
-    return hashlib.sha1(
-        base.encode("utf-8")
-    ).hexdigest()
-
-
-# ============================================================
-# DATE
-# ============================================================
-
-def parse_date(entry):
-
-    try:
-
-        if getattr(
-            entry,
-            "published_parsed",
-            None,
-        ):
-
-            ts = calendar.timegm(
-                entry.published_parsed
-            )
-
-            return datetime.fromtimestamp(
-                ts,
-                timezone.utc,
-            )
-
-        if getattr(
-            entry,
-            "updated_parsed",
-            None,
-        ):
-
-            ts = calendar.timegm(
-                entry.updated_parsed
-            )
-
-            return datetime.fromtimestamp(
-                ts,
-                timezone.utc,
-            )
-
-    except Exception:
-        pass
-
-    raw = (
-        getattr(
-            entry,
-            "published",
-            None,
-        )
-        or getattr(
-            entry,
-            "updated",
-            None,
-        )
-    )
-
-    if raw:
-
-        try:
-
-            dt = email.utils.parsedate_to_datetime(
-                raw
-            )
-
-            if dt.tzinfo is None:
-
-                dt = dt.replace(
-                    tzinfo=timezone.utc
-                )
-
-            return dt.astimezone(
-                timezone.utc
-            )
-
-        except Exception:
-            pass
-
-    return None
-
-
-# ============================================================
-# SUMMARY
-# ============================================================
-
-def make_summary(entry):
-
-    text = ""
-
-    if getattr(
-        entry,
-        "summary",
-        None,
-    ):
-
-        text = clean_text(
-            entry.summary
-        )
-
-    if not text and getattr(
-        entry,
-        "description",
-        None,
-    ):
-
-        text = clean_text(
-            entry.description
-        )
-
-    if not text:
-        return ""
-
-    text = re.sub(
-        r"\s*\.\.\.\s*$",
-        "",
-        text,
-    )
-
-    if len(text) > 500:
-
-        text = (
-            text[:497]
-            .rsplit(
-                " ",
-                1,
-            )[0]
-            + "..."
-        )
-
-    return text
-
-
-# ============================================================
-# LOCATION CHECKS
-# ============================================================
-
-def other_province_in_title(title):
-
-    t = normalize_persian_text(
-        title
-    )
-
-    if has_any(
-        t,
-        PROVINCE_TERMS,
-    ):
-        return False
-
-    # شهرهای معتبر استان در عنوان
-    # باعث می‌شوند عنوان محلی تلقی شود.
-    for city in CITY_TERMS:
-
-        if city in AMBIGUOUS_CITY_TERMS:
-            continue
-
-        if term_in(
-            t,
-            normalize_persian_text(city),
-        ):
-            return False
-
-    if has_any(
-        t,
-        SPECIAL_LOCAL_TERMS,
-    ):
-        return False
-
-    return has_any(
-        t,
-        OTHER_PROVINCE_TERMS,
-    )
-
-
-def foreign_location_in_title(title):
-
-    t = normalize_persian_text(
-        title
-    )
-
-    if has_any(
-        t,
-        PROVINCE_TERMS,
-    ):
-        return False
-
-    if has_any(
-        t,
-        SPECIAL_LOCAL_TERMS,
-    ):
-        return False
-
-    for city in CITY_TERMS:
-
-        if city in AMBIGUOUS_CITY_TERMS:
-            continue
-
-        if term_in(
-            t,
-            normalize_persian_text(city),
-        ):
-            return False
-
-    return has_any(
-        t,
-        FOREIGN_LOCATION_TERMS,
-    )
-
-
-# ============================================================
-# LOCAL GEOGRAPHIC SIGNALS
-# ============================================================
-
-def local_geographic_signals(
-    title,
-    summary,
-):
-
-    title_n = normalize_persian_text(
-        title
-    )
-
-    summary_n = normalize_persian_text(
-        summary
-    )
-
-    full = (
-        title_n
-        + " "
-        + summary_n
-    ).strip()
-
-    strong_province = has_any(
-        full,
-        PROVINCE_TERMS,
-    )
-
-    strong_special = has_any(
-        full,
-        SPECIAL_LOCAL_TERMS,
-    )
-
-    city_signals = []
-
-    for city in CITY_TERMS:
-
-        if city in AMBIGUOUS_CITY_TERMS:
-            continue
-
-        normalized_city = normalize_persian_text(
-            city
-        )
-
-        if term_in(
-            title_n,
-            normalized_city,
-        ):
-
-            city_signals.append(
-                ("title", city)
-            )
-
-        elif term_in(
-            summary_n,
-            normalized_city,
-        ):
-
-            city_signals.append(
-                ("summary", city)
-            )
-
-    return {
-        "province": strong_province,
-        "special": strong_special,
-        "cities": city_signals,
-    }
-
-
-# ============================================================
-# TERM SCORING
-# ============================================================
-
-def score_terms(
-    full_text,
-    title,
-    terms,
-    title_score,
-    body_score,
-):
-
-    score = 0
-
-    for term in terms:
-
-        normalized_term = normalize_persian_text(
-            term
-        )
-
-        if term_in(
-            title,
-            normalized_term,
-        ):
-
-            score += title_score
-
-        elif term_in(
-            full_text,
-            normalized_term,
-        ):
-
-            score += body_score
-
-    return score
-
-
-# ============================================================
-# STRICT LOCAL SCORE
-# ============================================================
-
-def local_score(
-    title,
-    summary,
-):
-
-    signals = local_geographic_signals(
-        title,
-        summary,
-    )
-
-    score = 0
-
-    # استان
-    if signals["province"]:
-        score += 60
-
-    # مناطق شاخص
-    if signals["special"]:
-        score += 45
-
-    # شهرهای معتبر استان
-    if signals["cities"]:
-
-        title_cities = sum(
-            1
-            for location, _
-            in signals["cities"]
-            if location == "title"
-        )
-
-        summary_cities = sum(
-            1
-            for location, _
-            in signals["cities"]
-            if location == "summary"
-        )
-
-        score += min(
-            title_cities * 35,
-            70,
-        )
-
-        score += min(
-            summary_cities * 15,
-            30,
-        )
-
-    full = (
-        normalize_persian_text(title)
-        + " "
-        + normalize_persian_text(summary)
-    ).strip()
-
-    context_count = sum(
-        1
-        for term in LOCAL_CONTEXT_TERMS
-        if term_in(
-            full,
-            normalize_persian_text(term),
-        )
-    )
-
-    # زمینه خبری فقط زمانی امتیاز می‌دهد
-    # که ابتدا سیگنال جغرافیایی واقعی وجود داشته باشد.
-    if (
-        signals["province"]
-        or signals["special"]
-        or signals["cities"]
-    ):
-
-        score += min(
-            context_count * 5,
-            30,
-        )
-
-    return score
-
-
-# ============================================================
-# TITLE LOCALITY
-# ============================================================
-
-def title_locality_type(title):
-
-    t = normalize_persian_text(
-        title
-    )
-
-    if has_any(
-        t,
-        PROVINCE_TERMS,
-    ):
-        return "province"
-
-    if has_any(
-        t,
-        SPECIAL_LOCAL_TERMS,
-    ):
-        return "special"
-
-    for city in CITY_TERMS:
-
-        if city in AMBIGUOUS_CITY_TERMS:
-            continue
-
-        if term_in(
-            t,
-            normalize_persian_text(city),
-        ):
-
-            return "city"
-
-    # فرهنگ فقط زمانی محلی است که
-    # خود عبارت دارای نام جغرافیایی استان باشد.
-    for culture_term in CULTURE_TERMS:
-
-        normalized_culture = (
-            normalize_persian_text(
-                culture_term
-            )
-        )
-
-        if term_in(
-            t,
-            normalized_culture,
-        ):
-
-            if (
-                "سیستان" in normalized_culture
-                or "بلوچستان" in normalized_culture
-                or "بلوچ" in normalized_culture
-                or "بلوچی" in normalized_culture
-                or "کلپورگان" in normalized_culture
-            ):
-
-                return "culture"
-
-    return "none"
-
-
-# ============================================================
-# STRICT LOCAL FILTER - FINAL
-# ============================================================
-
-def is_real_local_news(
-    title,
-    summary,
-    score=None,
-):
-
-    title_n = normalize_persian_text(
-        title
-    )
-
-    summary_n = normalize_persian_text(
-        summary
-    )
-
-    full = (
-        title_n
-        + " "
-        + summary_n
-    ).strip()
-
-    # --------------------------------------------------------
-    # 1. اخبار عمومی نامرتبط
-    # --------------------------------------------------------
-
-    for term in GENERAL_EXCLUDE_TERMS:
-
-        normalized_term = normalize_persian_text(
-            term
-        )
-
-        if term_in(
-            full,
-            normalized_term,
-        ):
-
-            return (
-                False,
-                f"general exclude: {term}",
-            )
-
-    # --------------------------------------------------------
-    # 2. استان دیگر در عنوان
-    # --------------------------------------------------------
-
-    if other_province_in_title(title):
-
-        return (
-            False,
-            "other province in title",
-        )
-
-    # --------------------------------------------------------
-    # 3. مکان خارجی در عنوان
-    # --------------------------------------------------------
-
-    if foreign_location_in_title(title):
-
-        return (
-            False,
-            "foreign location in title",
-        )
-
-    # --------------------------------------------------------
-    # 4. سیگنال جغرافیایی
-    # --------------------------------------------------------
-
-    signals = local_geographic_signals(
-        title,
-        summary,
-    )
-
-    has_province = signals["province"]
-    has_special = signals["special"]
-    cities = signals["cities"]
-
-    # --------------------------------------------------------
-    # 5. هیچ سیگنال محلی واقعی
-    # --------------------------------------------------------
-
-    if not (
-        has_province
-        or has_special
-        or cities
-    ):
-
-        return (
-            False,
-            "NO_STRONG_SISTAN_BALUCHISTAN_SIGNAL",
-        )
-
-    # --------------------------------------------------------
-    # 6. امتیاز
-    # --------------------------------------------------------
-
-    if score is None:
-
-        score = local_score(
-            title,
-            summary,
-        )
-
-    # --------------------------------------------------------
-    # 7. نام استان
-    # --------------------------------------------------------
-
-    if has_province:
-
-        # اگر استان فقط در خلاصه و حاشیه‌ای آمده باشد
-        # باید زمینه خبری هم وجود داشته باشد.
-
-        province_in_title = has_any(
-            title_n,
-            PROVINCE_TERMS,
-        )
-
-        if province_in_title:
-
-            if score < MIN_PROVINCE_SCORE:
-
-                return (
-                    False,
-                    f"province score too low: {score}",
-                )
-
-            return (
-                True,
-                "SISTAN_BALUCHISTAN_PROVINCE_TITLE",
-            )
-
-        # استان فقط در خلاصه
-        context_count = sum(
-            1
-            for term in LOCAL_CONTEXT_TERMS
-            if term_in(
-                full,
-                normalize_persian_text(term),
-            )
-        )
-
-        if (
-            context_count >= 2
-            and score >= 40
-        ):
-
-            return (
-                True,
-                "SISTAN_BALUCHISTAN_PROVINCE_CONTEXT",
-            )
-
-        return (
-            False,
-            "PROVINCE_ONLY_IN_BODY_WITHOUT_CONTEXT",
-        )
-
-    # --------------------------------------------------------
-    # 8. مناطق خاص
-    # --------------------------------------------------------
-
-    if has_special:
-
-        if score < MIN_SPECIAL_SCORE:
-
-            return (
-                False,
-                f"special local signal too weak: {score}",
-            )
-
-        # منطقه خاص باید همراه با محتوای خبری مرتبط باشد.
-        context_count = sum(
-            1
-            for term in LOCAL_CONTEXT_TERMS
-            if term_in(
-                full,
-                normalize_persian_text(term),
-            )
-        )
-
-        if context_count < 1:
-
-            return (
-                False,
-                "special location without news context",
-            )
-
-        return (
-            True,
-            "SISTAN_BALUCHISTAN_SPECIAL_AREA",
-        )
-
-    # --------------------------------------------------------
-    # 9. شهر مشخص
-    # --------------------------------------------------------
-
-    if cities:
-
-        title_city_count = sum(
-            1
-            for location, _
-            in cities
-            if location == "title"
-        )
-
-        summary_city_count = sum(
-            1
-            for location, _
-            in cities
-            if location == "summary"
-        )
-
-        context_count = sum(
-            1
-            for term in LOCAL_CONTEXT_TERMS
-            if term_in(
-                full,
-                normalize_persian_text(term),
-            )
-        )
-
-        # شهر در عنوان + حداقل یک زمینه خبری
-        if (
-            title_city_count > 0
-            and context_count >= 1
-            and score >= MIN_CITY_SCORE
-        ):
-
-            return (
-                True,
-                "SISTAN_BALUCHISTAN_CITY_TITLE",
-            )
-
-        # شهر فقط در متن + حداقل دو زمینه خبری
-        if (
-            summary_city_count > 0
-            and context_count >= 2
-            and score >= MIN_CITY_SCORE
-        ):
-
-            return (
-                True,
-                "SISTAN_BALUCHISTAN_CITY_CONTEXT",
-            )
-
-        return (
-            False,
-            "CITY_WITHOUT_SUFFICIENT_LOCAL_CONTEXT",
-        )
-
-    return (
-        False,
-        "LOCALITY_NOT_CONFIRMED",
-    )
-
-
-# ============================================================
-# TEXT SIMILARITY
-# ============================================================
-
-def sequence_similarity(
-    a,
-    b,
-):
-
-    a = normalize_title(a)
-    b = normalize_title(b)
-
-    if not a or not b:
-        return 0.0
-
-    return difflib.SequenceMatcher(
-        None,
-        a,
-        b,
-    ).ratio()
-
-
-def jaccard_similarity(
-    a,
-    b,
-):
-
-    sa = set(
-        tokenize(a)
-    )
-
-    sb = set(
-        tokenize(b)
-    )
-
-    if not sa or not sb:
-        return 0.0
-
-    return (
-        len(sa & sb)
-        / max(
-            len(sa | sb),
-            1,
-        )
-    )
-
-
-# ============================================================
-# DISTINCTIVE WORDS
-# ============================================================
-
-STOP_WORDS = {
-    "از",
-    "به",
-    "در",
-    "با",
-    "برای",
-    "و",
-    "یا",
-    "که",
-    "این",
-    "آن",
-    "یک",
-    "شد",
-    "شده",
-    "شود",
-    "کرد",
-    "کرده",
-    "است",
-    "هست",
-    "بود",
-    "بودند",
-    "نیز",
-    "اما",
-    "هم",
-    "بر",
-    "تا",
-    "را",
-    "وی",
-    "او",
-    "آنها",
-    "ما",
-    "من",
-    "ایران",
-    "کشور",
-    "استان",
-    "خبر",
-    "گزارش",
-    "اعلام",
-    "آخرین",
-    "مهم",
-    "جدید",
-    "امروز",
-    "دیروز",
-}
-
-
-def distinctive_words(text):
-
-    words = tokenize(
-        text
-    )
-
-    result = []
-
-    for word in words:
-
-        if word in STOP_WORDS:
-            continue
-
-        if len(word) < 3:
-            continue
-
-        result.append(word)
-
-    return set(result)
-
-
-def distinctive_similarity(
-    a,
-    b,
-):
-
-    sa = distinctive_words(a)
-    sb = distinctive_words(b)
-
-    if not sa or not sb:
-        return 0.0
-
-    return (
-        len(sa & sb)
-        / max(
-            len(sa | sb),
-            1,
-        )
-    )
-
-
-# ============================================================
-# EVENT SIMILARITY
-# ============================================================
-
-def event_similarity(
-    item_a,
-    item_b,
-):
-
-    title_a = item_a.get(
-        "title",
-        "",
-    )
-
-    title_b = item_b.get(
-        "title",
-        "",
-    )
-
-    summary_a = item_a.get(
-        "summary",
-        "",
-    )
-
-    summary_b = item_b.get(
-        "summary",
-        "",
-    )
-
-    title_score = max(
-        sequence_similarity(
-            title_a,
-            title_b,
-        ),
-        jaccard_similarity(
-            title_a,
-            title_b,
-        ),
-    )
-
-    summary_score = max(
-        jaccard_similarity(
-            summary_a,
-            summary_b,
-        ),
-        sequence_similarity(
-            summary_a,
-            summary_b,
-        ),
-    )
-
-    distinctive_score = distinctive_similarity(
-        title_a + " " + summary_a,
-        title_b + " " + summary_b,
-    )
-
-    character_score = sequence_similarity(
-        title_a + " " + summary_a,
-        title_b + " " + summary_b,
-    )
-
-    final_score = (
-        title_score * TITLE_WEIGHT
-        + summary_score * SUMMARY_WEIGHT
-        + distinctive_score * DISTINCTIVE_WEIGHT
-        + character_score * CHARACTER_WEIGHT
-    )
-
-    return round(
-        final_score * 100,
-        2,
-    ), {
-        "title": round(
-            title_score * 100,
-            2,
-        ),
-        "summary": round(
-            summary_score * 100,
-            2,
-        ),
-        "distinctive": round(
-            distinctive_score * 100,
-            2,
-        ),
-        "character": round(
-            character_score * 100,
-            2,
-        ),
-    }
-
-
-# ============================================================
-# EVENT MATCH
-# ============================================================
-
-def event_matches(
-    item,
-    event,
-):
-
-    try:
-
-        published_at = float(
-            event.get(
-                "published_at",
-                0,
-            )
-        )
-
-        item_timestamp = item[
-            "published"
-        ].timestamp()
-
-        distance_hours = abs(
-            item_timestamp
-            - published_at
-        ) / 3600
-
-        if distance_hours > EVENT_MAX_AGE_HOURS:
-
-            return (
-                False,
-                0,
-                {},
-                "event too old",
-            )
-
-    except Exception:
-
-        distance_hours = 0
-
-    reference = {
-        "title": event.get(
-            "title",
-            "",
-        ),
-        "summary": event.get(
-            "summary",
-            "",
-        ),
-    }
-
-    score, details = event_similarity(
-        item,
-        reference,
-    )
-
-    if score >= EVENT_DUPLICATE_THRESHOLD:
-
-        return (
-            True,
-            score,
-            details,
-            "duplicate event",
-        )
-
-    if score >= EVENT_PROBABLE_THRESHOLD:
-
-        item_tokens = distinctive_words(
-            item["title"]
-            + " "
-            + item["summary"]
-        )
-
-        event_tokens = distinctive_words(
-            event.get(
-                "title",
-                "",
-            )
-            + " "
-            + event.get(
-                "summary",
-                "",
-            )
-        )
-
-        overlap = (
-            len(
-                item_tokens & event_tokens
-            )
-            / max(
-                len(
-                    item_tokens | event_tokens
-                ),
-                1,
-            )
-        )
-
-        if overlap >= 0.35:
-
-            return (
-                True,
-                score,
-                details,
-                "probable duplicate event",
-            )
-
-    return (
-        False,
-        score,
-        details,
-        "new event",
-    )
-
-
-# ============================================================
-# EVENT CLUSTERING
-# ============================================================
-
-def cluster_candidates(
-    candidates,
-    existing_events,
-):
-
-    clusters = []
-
-    for item in candidates:
-
-        assigned = False
-        best_cluster = None
-        best_score = 0
-
-        for cluster in clusters:
-
-            reference = cluster[0]
-
-            score, _ = event_similarity(
-                item,
-                reference,
-            )
-
-            if score > best_score:
-
-                best_score = score
-                best_cluster = cluster
-
-        if (
-            best_cluster is not None
-            and best_score >= EVENT_PROBABLE_THRESHOLD
-        ):
-
-            best_cluster.append(
-                item
-            )
-
-            assigned = True
-
-            log.info(
-                "EVENT CLUSTER MERGE: "
-                f"{item['title']} "
-                f"score={best_score}"
-            )
-
-        if not assigned:
-
-            clusters.append(
-                [item]
-            )
-
-    return clusters
-
-
-# ============================================================
-# BEST VERSION
-# ============================================================
-
-def candidate_quality(item):
-
-    local = item.get(
-        "local_score",
-        0,
-    )
-
-    fresh = item.get(
-        "freshness",
-        0,
-    )
-
-    summary_length = len(
-        item.get(
-            "summary",
-            "",
-        )
-    )
-
-    summary_quality = min(
-        summary_length / 250,
-        1.0,
-    ) * 15
-
-    return (
-        local
-        + fresh
-        + summary_quality
-    )
-
-
-def select_best_version(
-    cluster
-):
-
-    ranked = sorted(
-        cluster,
-        key=lambda item: (
-            candidate_quality(item),
-            item.get(
-                "local_score",
-                0,
-            ),
-            item.get(
-                "freshness",
-                0,
-            ),
-            item["published"],
-        ),
-        reverse=True,
-    )
-
-    selected = ranked[0]
-
-    if len(cluster) > 1:
-
-        log.info(
-            "EVENT GROUP "
-            f"contains {len(cluster)} sources:"
-        )
-
-        for candidate in ranked:
-
-            log.info(
-                "  SOURCE VERSION: "
-                f"[{candidate['source']}] "
-                f"{candidate['title']} "
-                f"quality="
-                f"{candidate_quality(candidate):.2f}"
-            )
-
-    return selected
-
-
-# ============================================================
-# FRESHNESS
-# ============================================================
-
-def freshness_score(
-    published
-):
-
-    now = datetime.now(
-        timezone.utc
-    )
-
-    try:
-
-        age_hours = (
-            now - published
-        ).total_seconds() / 3600
-
-    except Exception:
-
-        return 0
-
-    if age_hours < 0:
-        age_hours = 0
-
-    if age_hours >= FRESHNESS_HOURS:
-        return 0
-
-    return max(
-        0,
-        int(
-            20
-            * (
-                1
-                - (
-                    age_hours
-                    / FRESHNESS_HOURS
-                )
-            )
-        ),
-    )
-
-
-# ============================================================
-# RSS COLLECTION
-# ============================================================
-
-def collect_news():
-
-    now = datetime.now(
-        timezone.utc
-    )
-
-    max_age = timedelta(
-        hours=MAX_NEWS_AGE_HOURS
-    )
-
-    items = []
-
-    for (
-        source_name,
-        source_domain,
-        feeds,
-    ) in SOURCES:
-
-        for feed_url in feeds:
-
-            try:
-
-                response = SESSION.get(
-                    feed_url,
-                    timeout=18,
-                )
-
-                response.raise_for_status()
-
-                feed = feedparser.parse(
-                    response.content
-                )
-
-            except Exception as exc:
-
-                log.warning(
-                    f"RSS error "
-                    f"{source_name}: {exc}"
-                )
-
-                continue
-
-            for entry in feed.entries:
-
-                title = clean_text(
-                    getattr(
-                        entry,
-                        "title",
-                        "",
-                    )
-                )
-
-                link = (
-                    getattr(
-                        entry,
-                        "link",
-                        "",
-                    )
-                    .strip()
-                )
-
-                if not title or not link:
-                    continue
-
-                if not is_allowed_source_url(
-                    link,
-                    source_domain,
-                ):
-                    continue
-
-                published = parse_date(
-                    entry
-                )
-
-                if not published:
-                    continue
-
-                age = now - published
-
-                if (
-                    age < timedelta(0)
-                    or age > max_age
-                ):
-                    continue
-
-                summary = make_summary(
-                    entry
-                )
-
-                if len(summary) > 480:
-
-                    summary = (
-                        summary[:477]
-                        + "..."
-                    )
-
-                items.append({
-                    "title": title,
-                    "summary": summary,
-                    "link": normalize_url(
-                        link
-                    ),
-                    "published": published,
-                    "source": source_name,
-                    "source_domain": source_domain,
-                })
+    response.raise_for_status()
 
-    unique = {}
+    data = response.json()
 
-    for item in items:
-
-        unique[item["link"]] = item
-
-    news = sorted(
-        unique.values(),
-        key=lambda x: x["published"],
-        reverse=True,
-    )
-
-    return news[:MAX_CANDIDATES]
-
-
-# ============================================================
-# PREPARE CANDIDATES
-# ============================================================
-
-def prepare_candidates(
-    news,
-    sent_links,
-    sent_titles,
-):
-
-    candidates = []
-
-    for item in news:
-
-        normalized_link = normalize_url(
-            item["link"]
-        )
-
-        # ----------------------------------------------------
-        # LINK DUPLICATE
-        # ----------------------------------------------------
-
-        if normalized_link in sent_links:
-
-            log.info(
-                "SKIP LINK DUPLICATE: "
-                f"{item['title']}"
-            )
-
-            continue
-
-        # ----------------------------------------------------
-        # TITLE DUPLICATE
-        # ----------------------------------------------------
-
-        duplicate_title = False
-
-        for old_title in sent_titles:
-
-            score = max(
-                sequence_similarity(
-                    item["title"],
-                    old_title,
-                ),
-                jaccard_similarity(
-                    item["title"],
-                    old_title,
-                ),
-            )
-
-            if score >= 0.75:
-
-                duplicate_title = True
-
-                log.info(
-                    "SKIP TITLE DUPLICATE: "
-                    f"{item['title']} "
-                    f"score={score:.2f}"
-                )
-
-                break
-
-        if duplicate_title:
-            continue
-
-        # ----------------------------------------------------
-        # LOCAL FILTER
-        # ----------------------------------------------------
-
-        local = local_score(
-            item["title"],
-            item["summary"],
-        )
-
-        valid, reason = is_real_local_news(
-            item["title"],
-            item["summary"],
-            local,
-        )
-
-        if not valid:
-
-            log.info(
-                "FILTERED "
-                f"[{reason}] "
-                f"score={local}: "
-                f"{item['title']}"
-            )
-
-            continue
-
-        # ----------------------------------------------------
-        # FRESHNESS
-        # ----------------------------------------------------
-
-        fresh = freshness_score(
-            item["published"]
-        )
-
-        item["local_score"] = local
-        item["freshness"] = fresh
-        item["filter_reason"] = reason
-
-        candidates.append(
-            item
-        )
-
-    return candidates
-
-
-# ============================================================
-# REMOVE PUBLISHED EVENTS
-# ============================================================
-
-def remove_published_events(
-    candidates,
-    events,
-):
-
-    remaining = []
-
-    for item in candidates:
-
-        matched_event = None
-        matched_score = 0
-        matched_details = {}
-        matched_reason = ""
-
-        for event in events:
-
-            (
-                matched,
-                score,
-                details,
-                reason,
-            ) = event_matches(
-                item,
-                event,
-            )
-
-            if (
-                matched
-                and score > matched_score
-            ):
-
-                matched_event = event
-                matched_score = score
-                matched_details = details
-                matched_reason = reason
-
-        if matched_event is not None:
-
-            log.info(
-                "SKIP ALREADY PUBLISHED EVENT: "
-                f"{item['title']}"
-            )
-
-            log.info(
-                "  matched event: "
-                f"{matched_event.get('title', '')}"
-            )
-
-            log.info(
-                "  event score: "
-                f"{matched_score}"
-            )
-
-            log.info(
-                "  details: "
-                f"{matched_details}"
-            )
-
-            log.info(
-                "  reason: "
-                f"{matched_reason}"
-            )
-
-            continue
-
-        remaining.append(
-            item
-        )
-
-    return remaining
-
-
-# ============================================================
-# SELECT BEST EVENT
-# ============================================================
-
-def select_best_event(
-    candidates
-):
-
-    if not candidates:
-        return None
-
-    clusters = cluster_candidates(
-        candidates,
-        [],
-    )
-
-    event_versions = []
-
-    for cluster in clusters:
-
-        selected = select_best_version(
-            cluster
-        )
-
-        selected = dict(
-            selected
-        )
-
-        selected["event_size"] = len(
-            cluster
-        )
-
-        selected["event_sources"] = list({
-            x["source"]
-            for x in cluster
-        })
-
-        event_versions.append(
-            selected
-        )
-
-    event_versions.sort(
-        key=lambda item: (
-            item.get(
-                "local_score",
-                0,
-            ),
-            item.get(
-                "freshness",
-                0,
-            ),
-            candidate_quality(item),
-            item["published"],
-        ),
-        reverse=True,
-    )
-
-    return event_versions[0]
-
-
-# ============================================================
-# SAVE EVENT
-# ============================================================
-
-def register_published_event(
-    item
-):
-
-    events = load_events()
-
-    event = {
-        "event_id": make_event_id(
-            item
-        ),
-        "title": item["title"],
-        "summary": item["summary"],
-        "link": item["link"],
-        "source": item["source"],
-        "sources": item.get(
-            "event_sources",
-            [
-                item["source"]
-            ],
-        ),
-        "published_at": item[
-            "published"
-        ].timestamp(),
-        "registered_at": time.time(),
-        "local_score": item.get(
-            "local_score",
-            0,
-        ),
-    }
-
-    events.insert(
-        0,
-        event,
-    )
-
-    save_events(
-        events
-    )
-
-
-# ============================================================
-# OG IMAGE
-# ============================================================
-
-def get_og_image(
-    url
-):
-
-    try:
-
-        response = SESSION.get(
-            url,
-            timeout=10,
-        )
-
-        response.raise_for_status()
-
-        soup = BeautifulSoup(
-            response.text,
-            "html.parser",
+    if not data.get("ok"):
+        raise RuntimeError(
+            f"Telegram API error: {data}"
         )
 
-        for prop in [
-            "og:image",
-            "twitter:image",
-        ]:
-
-            tag = (
-                soup.find(
-                    "meta",
-                    property=prop,
-                )
-                or soup.find(
-                    "meta",
-                    attrs={
-                        "name": prop
-                    },
-                )
-            )
-
-            if (
-                tag
-                and tag.get("content")
-            ):
-
-                image = tag[
-                    "content"
-                ].strip()
-
-                image = urljoin(
-                    url,
-                    image,
-                )
-
-                return image
-
-    except Exception as exc:
-
-        log.warning(
-            f"OG image error: "
-            f"{exc}"
-        )
-
-    return None
-
-
-# ============================================================
-# SAFE CUT
-# ============================================================
-
-def safe_cut(
-    text,
-    max_length,
-):
-
-    if not text:
-        return ""
-
-    if len(text) <= max_length:
-        return text
-
-    if max_length <= 3:
-        return text[:max_length]
-
-    shortened = (
-        text[
-            :max_length - 3
-        ]
-        .rsplit(
-            " ",
-            1,
-        )[0]
-    )
-
-    return shortened + "..."
-
-
-# ============================================================
-# MESSAGE
-# ============================================================
-
-def build_message(item):
-
-    # عنوان استان دیگر به ابتدای پیام اضافه نمی‌شود.
-    text = (
-        f"📰 {item['title']}\n\n"
-    )
-
-    if item.get("summary"):
-
-        text += (
-            item["summary"]
-            + "\n\n"
-        )
-
-    text += (
-        f"🗞 منبع: {item['source']}\n\n"
-        "📱 جهان‌تاب"
-    )
-
-    return text
-
-
-def build_keyboard(
-    url
-):
-
-    return json.dumps(
-        {
-            "inline_keyboard": [
-                [
-                    {
-                        "text": "🔗 مشاهده خبر",
-                        "url": url,
-                    }
-                ],
-                [
-                    {
-                        "text": "📨 تلگرام",
-                        "url": TELEGRAM_URL,
-                    },
-                    {
-                        "text": "🟦 بله",
-                        "url": BALE_URL,
-                    },
-                    {
-                        "text": "🟠 سروش",
-                        "url": SOROUSH_URL,
-                    },
-                ],
-            ]
-        },
-        ensure_ascii=False,
-    )
+    return data.get("result")
 
 
 # ============================================================
 # BALE API
 # ============================================================
 
-def bale_api(
-    method,
-    data=None,
-    files=None,
-):
+def bale_call(method, data=None, files=None):
 
     url = (
-        "https://tapi.bale.ai/"
-        f"bot{BOT_TOKEN}/{method}"
+        f"{BALE_API}"
+        f"{BALE_BOT_TOKEN}/"
+        f"{method}"
     )
 
-    response = SESSION.post(
+    response = session.post(
         url,
-        data=data,
+        data=data or {},
         files=files,
-        timeout=30,
+        timeout=TIMEOUT
     )
 
     response.raise_for_status()
 
     result = response.json()
 
-    if not result.get("ok"):
-
+    if not result.get("ok", False):
         raise RuntimeError(
-            result
+            f"Bale API error: {result}"
         )
+
+    return result.get("result")
+
+
+# ============================================================
+# OFFSET
+# ============================================================
+
+def load_offset():
+
+    path = Path(OFFSET_FILE)
+
+    if not path.exists():
+        return None
+
+    try:
+
+        data = json.loads(
+            path.read_text(
+                encoding="utf-8"
+            )
+        )
+
+        return int(data["offset"])
+
+    except Exception as exc:
+
+        log.warning(
+            "Could not read offset: %s",
+            exc
+        )
+
+        return None
+
+
+def save_offset(offset):
+
+    path = Path(OFFSET_FILE)
+    tmp = Path(str(path) + ".tmp")
+
+    tmp.write_text(
+        json.dumps(
+            {"offset": int(offset)},
+            ensure_ascii=False,
+            indent=2
+        ),
+        encoding="utf-8"
+    )
+
+    tmp.replace(path)
+
+    log.info(
+        "Saved offset: %s",
+        offset
+    )
+
+
+# ============================================================
+# GET TELEGRAM UPDATES
+# ============================================================
+
+def get_updates(offset=None):
+
+    payload = {
+        "limit": MAX_UPDATES,
+        "timeout": 5,
+        "allowed_updates": [
+            "channel_post"
+        ]
+    }
+
+    if offset is not None:
+        payload["offset"] = offset
+
+    return telegram_call(
+        "getUpdates",
+        payload
+    )
+
+
+# ============================================================
+# CHECK TARGET CHANNEL
+# ============================================================
+
+def is_target_channel(message):
+
+    chat = message.get("chat") or {}
+
+    if chat.get("type") != "channel":
+        return False
+
+    username = (
+        chat.get("username") or ""
+    ).lstrip("@").lower()
+
+    return username == TELEGRAM_CHANNEL_USERNAME
+
+
+# ============================================================
+# DOWNLOAD TELEGRAM FILE
+# ============================================================
+
+def download_telegram_file(
+    file_id,
+    suffix=""
+):
+
+    info = telegram_call(
+        "getFile",
+        {
+            "file_id": file_id
+        }
+    )
+
+    file_path = info.get("file_path")
+
+    if not file_path:
+        raise RuntimeError(
+            "Telegram did not return file_path"
+        )
+
+    url = (
+        f"{TELEGRAM_FILE_API}"
+        f"{TELEGRAM_BOT_TOKEN}/"
+        f"{file_path}"
+    )
+
+    response = session.get(
+        url,
+        timeout=TIMEOUT,
+        stream=True
+    )
+
+    response.raise_for_status()
+
+    if not suffix and "." in file_path:
+        suffix = "." + file_path.split(".")[-1]
+
+    temp = tempfile.NamedTemporaryFile(
+        delete=False,
+        suffix=suffix
+    )
+
+    try:
+
+        for chunk in response.iter_content(
+            chunk_size=1024 * 1024
+        ):
+
+            if chunk:
+                temp.write(chunk)
+
+        temp.close()
+
+        return temp.name
+
+    except Exception:
+
+        temp.close()
+
+        try:
+            os.unlink(temp.name)
+        except Exception:
+            pass
+
+        raise
+
+
+# ============================================================
+# TEXT / CAPTION
+# ============================================================
+
+def get_text(message):
+
+    return (
+        message.get("text")
+        or message.get("caption")
+        or ""
+    ).strip()
+
+
+def split_text(text):
+
+    if not text:
+        return []
+
+    if len(text) <= BALE_TEXT_LIMIT:
+        return [text]
+
+    result = []
+
+    remaining = text
+
+    while len(remaining) > BALE_TEXT_LIMIT:
+
+        cut = remaining.rfind(
+            "\n",
+            0,
+            BALE_TEXT_LIMIT
+        )
+
+        if cut < 100:
+            cut = remaining.rfind(
+                " ",
+                0,
+                BALE_TEXT_LIMIT
+            )
+
+        if cut < 100:
+            cut = BALE_TEXT_LIMIT
+
+        result.append(
+            remaining[:cut].strip()
+        )
+
+        remaining = remaining[cut:].strip()
+
+    if remaining:
+        result.append(remaining)
 
     return result
 
 
 # ============================================================
-# PUBLISH ITEM
+# CHANNEL BUTTONS
 # ============================================================
 
-def publish_item(
-    item
+def extract_source_url(text):
+
+    if not text:
+        return None
+
+    import re
+
+    urls = re.findall(
+        r"https?://[^\s<>\]\)]+",
+        text,
+        flags=re.IGNORECASE
+    )
+
+    for url in urls:
+
+        url = url.rstrip(
+            ".,،؛:!؟)]}"
+        )
+
+        lower = url.lower()
+
+        if (
+            "t.me/jahantab_news" in lower
+            or "ble.ir/jahantabnews" in lower
+            or "splus.ir/jahantabnews" in lower
+        ):
+            continue
+
+        return url
+
+    return None
+
+
+def build_keyboard(text=""):
+
+    rows = []
+
+    source_url = extract_source_url(text)
+
+    if source_url:
+
+        rows.append([
+            {
+                "text": "🔗 مشاهده خبر",
+                "url": source_url
+            }
+        ])
+
+    rows.append([
+        {
+            "text": "📨 تلگرام",
+            "url": TELEGRAM_URL
+        },
+        {
+            "text": "🟦 بله",
+            "url": BALE_URL
+        },
+        {
+            "text": "🟠 سروش",
+            "url": SOROUSH_URL
+        }
+    ])
+
+    return json.dumps(
+        {
+            "inline_keyboard": rows
+        },
+        ensure_ascii=False
+    )
+
+
+# ============================================================
+# SEND TEXT
+# ============================================================
+
+def send_text(text):
+
+    parts = split_text(text)
+
+    if not parts:
+        return False
+
+    keyboard = build_keyboard(text)
+
+    for index, part in enumerate(parts):
+
+        data = {
+            "chat_id": BALE_CHAT_ID,
+            "text": part
+        }
+
+        if index == len(parts) - 1:
+            data["reply_markup"] = keyboard
+
+        bale_call(
+            "sendMessage",
+            data=data
+        )
+
+    return True
+
+
+# ============================================================
+# SEND MEDIA
+# ============================================================
+
+def send_media(
+    method,
+    field,
+    file_path,
+    caption="",
+    original_text=""
 ):
+
+    caption = caption or ""
+
+    # Caption fits into one Bale media message.
+    if len(caption) <= BALE_CAPTION_LIMIT:
+
+        data = {
+            "chat_id": BALE_CHAT_ID,
+            "caption": caption,
+            "reply_markup": build_keyboard(
+                original_text or caption
+            )
+        }
+
+        with open(
+            file_path,
+            "rb"
+        ) as media:
+
+            bale_call(
+                method,
+                data=data,
+                files={
+                    field: media
+                }
+            )
+
+        return True
+
+    # Caption is too long:
+    # send media first, then complete text.
+    data = {
+        "chat_id": BALE_CHAT_ID
+    }
+
+    with open(
+        file_path,
+        "rb"
+    ) as media:
+
+        bale_call(
+            method,
+            data=data,
+            files={
+                field: media
+            }
+        )
+
+    send_text(caption)
+
+    return True
+
+
+# ============================================================
+# PHOTO
+# ============================================================
+
+def mirror_photo(message):
+
+    photos = message.get("photo") or []
+
+    if not photos:
+        return False
+
+    photo = photos[-1]
+
+    file_id = photo.get("file_id")
+
+    if not file_id:
+        return False
+
+    caption = get_text(message)
+
+    path = download_telegram_file(
+        file_id,
+        ".jpg"
+    )
 
     try:
 
-        text = build_message(
-            item
+        return send_media(
+            "sendPhoto",
+            "photo",
+            path,
+            caption,
+            caption
         )
 
-        keyboard = build_keyboard(
-            item["link"]
+    finally:
+
+        try:
+            os.unlink(path)
+        except Exception:
+            pass
+
+
+# ============================================================
+# VIDEO
+# ============================================================
+
+def mirror_video(message):
+
+    video = message.get("video")
+
+    if not video:
+        return False
+
+    file_id = video.get("file_id")
+
+    if not file_id:
+        return False
+
+    caption = get_text(message)
+
+    path = download_telegram_file(
+        file_id,
+        ".mp4"
+    )
+
+    try:
+
+        return send_media(
+            "sendVideo",
+            "video",
+            path,
+            caption,
+            caption
         )
 
-        # ----------------------------------------------------
-        # OG IMAGE
-        # ----------------------------------------------------
+    finally:
 
-        image_url = get_og_image(
-            item["link"]
+        try:
+            os.unlink(path)
+        except Exception:
+            pass
+
+
+# ============================================================
+# AUDIO / MUSIC
+# ============================================================
+
+def mirror_audio(message):
+
+    audio = message.get("audio")
+
+    if not audio:
+        return False
+
+    file_id = audio.get("file_id")
+
+    if not file_id:
+        return False
+
+    caption = get_text(message)
+
+    file_name = audio.get(
+        "file_name",
+        "audio"
+    )
+
+    suffix = ""
+
+    if "." in file_name:
+        suffix = "." + file_name.split(".")[-1]
+
+    path = download_telegram_file(
+        file_id,
+        suffix
+    )
+
+    try:
+
+        return send_media(
+            "sendAudio",
+            "audio",
+            path,
+            caption,
+            caption
         )
 
-        if image_url:
+    finally:
 
-            try:
+        try:
+            os.unlink(path)
+        except Exception:
+            pass
 
-                image_response = SESSION.get(
-                    image_url,
-                    timeout=12,
-                )
 
-                image_response.raise_for_status()
+# ============================================================
+# VOICE
+# ============================================================
 
-                content_type = (
-                    image_response
-                    .headers
-                    .get(
-                        "Content-Type",
-                        "",
-                    )
-                    .lower()
-                )
+def mirror_voice(message):
 
-                image_size = len(
-                    image_response.content
-                )
+    voice = message.get("voice")
 
-                if (
-                    content_type.startswith(
-                        "image/"
-                    )
-                    and image_size < 5_000_000
-                ):
+    if not voice:
+        return False
 
-                    bale_api(
-                        "sendPhoto",
-                        data={
-                            "chat_id": CHAT_ID,
-                            "caption": safe_cut(
-                                text,
-                                MAX_CAPTION_LEN,
-                            ),
-                            "reply_markup": keyboard,
-                        },
-                        files={
-                            "photo": (
-                                "news.jpg",
-                                image_response.content,
-                            )
-                        },
-                    )
+    file_id = voice.get("file_id")
 
-                    log.info(
-                        "Published with image"
-                    )
+    if not file_id:
+        return False
 
-                    return True
+    caption = get_text(message)
 
-            except Exception as exc:
+    path = download_telegram_file(
+        file_id,
+        ".ogg"
+    )
 
-                log.warning(
-                    "Photo publish failed: "
-                    f"{exc}"
-                )
+    try:
 
-        # ----------------------------------------------------
-        # TEXT FALLBACK
-        # ----------------------------------------------------
-
-        bale_api(
-            "sendMessage",
-            data={
-                "chat_id": CHAT_ID,
-                "text": safe_cut(
-                    text,
-                    MAX_TEXT_LEN,
-                ),
-                "reply_markup": keyboard,
-            },
+        return send_media(
+            "sendVoice",
+            "voice",
+            path,
+            caption,
+            caption
         )
+
+    finally:
+
+        try:
+            os.unlink(path)
+        except Exception:
+            pass
+
+
+# ============================================================
+# DOCUMENT / FILE
+# ============================================================
+
+def mirror_document(message):
+
+    document = message.get("document")
+
+    if not document:
+        return False
+
+    file_id = document.get("file_id")
+
+    if not file_id:
+        return False
+
+    caption = get_text(message)
+
+    file_name = document.get(
+        "file_name",
+        "file"
+    )
+
+    suffix = ""
+
+    if "." in file_name:
+        suffix = "." + file_name.split(".")[-1]
+
+    path = download_telegram_file(
+        file_id,
+        suffix
+    )
+
+    try:
+
+        return send_media(
+            "sendDocument",
+            "document",
+            path,
+            caption,
+            caption
+        )
+
+    finally:
+
+        try:
+            os.unlink(path)
+        except Exception:
+            pass
+
+
+# ============================================================
+# ANIMATION / GIF
+# ============================================================
+
+def mirror_animation(message):
+
+    animation = message.get("animation")
+
+    if not animation:
+        return False
+
+    file_id = animation.get("file_id")
+
+    if not file_id:
+        return False
+
+    caption = get_text(message)
+
+    path = download_telegram_file(
+        file_id,
+        ".mp4"
+    )
+
+    try:
+
+        return send_media(
+            "sendAnimation",
+            "animation",
+            path,
+            caption,
+            caption
+        )
+
+    finally:
+
+        try:
+            os.unlink(path)
+        except Exception:
+            pass
+
+
+# ============================================================
+# ROUTER
+# ============================================================
+
+def mirror_post(message):
+
+    message_id = message.get(
+        "message_id"
+    )
+
+    log.info(
+        "Processing Telegram post %s",
+        message_id
+    )
+
+    if not is_target_channel(message):
+
+        chat = message.get("chat") or {}
 
         log.info(
-            "Published as text"
+            "Skipped channel: %s",
+            chat.get("username")
+            or chat.get("title")
         )
 
         return True
 
-    except Exception as exc:
+    # --------------------------------------------------------
+    # PHOTO
+    # --------------------------------------------------------
 
-        log.error(
-            f"Publish failed: "
-            f"{exc}"
+    if message.get("photo"):
+
+        log.info(
+            "Post %s -> PHOTO",
+            message_id
         )
 
-        return False
+        return mirror_photo(message)
+
+    # --------------------------------------------------------
+    # VIDEO
+    # --------------------------------------------------------
+
+    if message.get("video"):
+
+        log.info(
+            "Post %s -> VIDEO",
+            message_id
+        )
+
+        return mirror_video(message)
+
+    # --------------------------------------------------------
+    # AUDIO / MUSIC
+    # --------------------------------------------------------
+
+    if message.get("audio"):
+
+        log.info(
+            "Post %s -> AUDIO",
+            message_id
+        )
+
+        return mirror_audio(message)
+
+    # --------------------------------------------------------
+    # VOICE
+    # --------------------------------------------------------
+
+    if message.get("voice"):
+
+        log.info(
+            "Post %s -> VOICE",
+            message_id
+        )
+
+        return mirror_voice(message)
+
+    # --------------------------------------------------------
+    # DOCUMENT
+    # --------------------------------------------------------
+
+    if message.get("document"):
+
+        log.info(
+            "Post %s -> DOCUMENT",
+            message_id
+        )
+
+        return mirror_document(message)
+
+    # --------------------------------------------------------
+    # ANIMATION
+    # --------------------------------------------------------
+
+    if message.get("animation"):
+
+        log.info(
+            "Post %s -> ANIMATION",
+            message_id
+        )
+
+        return mirror_animation(message)
+
+    # --------------------------------------------------------
+    # TEXT
+    # --------------------------------------------------------
+
+    if message.get("text"):
+
+        log.info(
+            "Post %s -> TEXT",
+            message_id
+        )
+
+        return send_text(
+            message.get("text", "")
+        )
+
+    # --------------------------------------------------------
+    # UNSUPPORTED
+    # --------------------------------------------------------
+
+    log.warning(
+        "Post %s has unsupported Telegram content type.",
+        message_id
+    )
+
+    # Mark as processed so the workflow does not get stuck.
+    return True
+
+
+# ============================================================
+# PROCESS UPDATES
+# ============================================================
+
+def process_updates():
+
+    offset = load_offset()
+
+    updates = get_updates(offset)
+
+    if not updates:
+
+        log.info(
+            "No new Telegram posts."
+        )
+
+        return
+
+    log.info(
+        "Received %d update(s).",
+        len(updates)
+    )
+
+    for update in updates:
+
+        update_id = update.get(
+            "update_id"
+        )
+
+        if update_id is None:
+            continue
+
+        channel_post = update.get(
+            "channel_post"
+        )
+
+        # We only process channel_post.
+        if not channel_post:
+
+            save_offset(
+                update_id + 1
+            )
+
+            continue
+
+        try:
+
+            success = mirror_post(
+                channel_post
+            )
+
+            if not success:
+                raise RuntimeError(
+                    "Mirror returned False"
+                )
+
+            # Only after successful publishing.
+            save_offset(
+                update_id + 1
+            )
+
+            log.info(
+                "Update %s completed.",
+                update_id
+            )
+
+        except Exception as exc:
+
+            log.error(
+                "Update %s failed: %s",
+                update_id,
+                exc
+            )
+
+            # Do NOT advance offset.
+            # The next GitHub Actions run will retry it.
+            raise
 
 
 # ============================================================
@@ -3389,354 +1043,52 @@ def publish_item(
 
 def main():
 
-    log.info("=" * 70)
+    log.info("=" * 60)
+    log.info(
+        "JAHANTAB TELEGRAM -> BALE MIRROR"
+    )
+    log.info("=" * 60)
+
+    validate_config()
 
     log.info(
-        "JAHANTAB | جهان‌تاب v9.1 START"
+        "Source: @%s",
+        TELEGRAM_CHANNEL_USERNAME
     )
 
     log.info(
-        "STRICT Sistan & Baluchestan "
-        "geographic filtering ENABLED"
+        "Destination: %s",
+        BALE_CHAT_ID
     )
+
+    process_updates()
 
     log.info(
-        "Event-based duplicate detection ENABLED"
+        "Run completed successfully."
     )
-
-    log.info(
-        "Publish interval: 30 minutes"
-    )
-
-    log.info("=" * 70)
-
-    if not acquire_lock():
-
-        log.warning(
-            "Another process is running"
-        )
-
-        return
-
-    try:
-
-        # ----------------------------------------------------
-        # COOLDOWN
-        # ----------------------------------------------------
-
-        if not can_publish():
-
-            log.info(
-                "30-minute cooldown active"
-            )
-
-            return
-
-        # ----------------------------------------------------
-        # LOAD STATE
-        # ----------------------------------------------------
-
-        sent_links = load_sent_links()
-
-        sent_titles = load_sent_titles()
-
-        published_events = load_events()
-
-        log.info(
-            f"Known links: "
-            f"{len(sent_links)}"
-        )
-
-        log.info(
-            f"Known titles: "
-            f"{len(sent_titles)}"
-        )
-
-        log.info(
-            f"Known events: "
-            f"{len(published_events)}"
-        )
-
-        # ----------------------------------------------------
-        # COLLECT
-        # ----------------------------------------------------
-
-        news = collect_news()
-
-        log.info(
-            f"Collected RSS items: "
-            f"{len(news)}"
-        )
-
-        if not news:
-
-            log.info(
-                "No RSS news collected"
-            )
-
-            return
-
-        # ----------------------------------------------------
-        # LOCAL FILTER
-        # ----------------------------------------------------
-
-        candidates = prepare_candidates(
-            news,
-            sent_links,
-            sent_titles,
-        )
-
-        log.info(
-            f"Strict local candidates: "
-            f"{len(candidates)}"
-        )
-
-        if not candidates:
-
-            log.info(
-                "No suitable Sistan & "
-                "Baluchestan candidates"
-            )
-
-            return
-
-        # ----------------------------------------------------
-        # EVENT DEDUP
-        # ----------------------------------------------------
-
-        candidates = remove_published_events(
-            candidates,
-            published_events,
-        )
-
-        log.info(
-            "Candidates after "
-            "published-event dedup: "
-            f"{len(candidates)}"
-        )
-
-        if not candidates:
-
-            log.info(
-                "All candidates belong to "
-                "already published events"
-            )
-
-            return
-
-        # ----------------------------------------------------
-        # GROUP SAME EVENT
-        # ----------------------------------------------------
-
-        selected = select_best_event(
-            candidates
-        )
-
-        if not selected:
-
-            log.info(
-                "No event selected"
-            )
-
-            return
-
-        # ----------------------------------------------------
-        # LOG EVENT
-        # ----------------------------------------------------
-
-        log.info("=" * 70)
-
-        log.info(
-            "SELECTED EVENT"
-        )
-
-        log.info(
-            f"Title: {selected['title']}"
-        )
-
-        log.info(
-            f"Source: {selected['source']}"
-        )
-
-        log.info(
-            f"Filter reason: "
-            f"{selected.get('filter_reason', '')}"
-        )
-
-        log.info(
-            f"Local score: "
-            f"{selected['local_score']}"
-        )
-
-        log.info(
-            f"Freshness: "
-            f"{selected['freshness']}"
-        )
-
-        log.info(
-            f"Event versions: "
-            f"{selected.get('event_size', 1)}"
-        )
-
-        log.info(
-            f"Event sources: "
-            f"{selected.get('event_sources', [])}"
-        )
-
-        log.info("=" * 70)
-
-        # ----------------------------------------------------
-        # FINAL SAFETY CHECK
-        # ----------------------------------------------------
-
-        final_valid, final_reason = (
-            is_real_local_news(
-                selected["title"],
-                selected["summary"],
-                selected.get(
-                    "local_score",
-                    0,
-                ),
-            )
-        )
-
-        if not final_valid:
-
-            log.error(
-                "FINAL SAFETY FILTER BLOCKED NEWS: "
-                f"{selected['title']}"
-            )
-
-            log.error(
-                f"Reason: {final_reason}"
-            )
-
-            return
-
-        # ----------------------------------------------------
-        # PUBLISH
-        # ----------------------------------------------------
-
-        published = publish_item(
-            selected
-        )
-
-        if not published:
-
-            log.error(
-                "News was NOT published."
-            )
-
-            log.error(
-                "State files will NOT be updated."
-            )
-
-            return
-
-        # ----------------------------------------------------
-        # SAVE LINK
-        # ----------------------------------------------------
-
-        save_sent_link(
-            selected["link"]
-        )
-
-        # ----------------------------------------------------
-        # SAVE TITLE
-        # ----------------------------------------------------
-
-        save_sent_title(
-            selected["title"]
-        )
-
-        # ----------------------------------------------------
-        # REGISTER EVENT
-        # ----------------------------------------------------
-
-        register_published_event(
-            selected
-        )
-
-        # ----------------------------------------------------
-        # SAVE PUBLISH STATE
-        # ----------------------------------------------------
-
-        save_publish_state(
-            {
-                "last_title": selected[
-                    "title"
-                ],
-                "last_link": selected[
-                    "link"
-                ],
-                "last_source": selected[
-                    "source"
-                ],
-                "last_score": selected[
-                    "local_score"
-                ],
-                "last_event_size": selected.get(
-                    "event_size",
-                    1,
-                ),
-                "last_event_sources": selected.get(
-                    "event_sources",
-                    [
-                        selected["source"]
-                    ],
-                ),
-            }
-        )
-
-        # ----------------------------------------------------
-        # PRUNE
-        # ----------------------------------------------------
-
-        prune_file(
-            STATE_FILE,
-            5000,
-        )
-
-        prune_file(
-            TITLES_FILE,
-            MAX_TITLES_KEPT,
-        )
-
-        log.info("=" * 70)
-
-        log.info(
-            "SUCCESS"
-        )
-
-        log.info(
-            "News published."
-        )
-
-        log.info(
-            "Link + title + event state saved."
-        )
-
-        log.info("=" * 70)
-
-    except Exception as exc:
-
-        log.exception(
-            f"MAIN ERROR: {exc}"
-        )
-
-    finally:
-
-        release_lock()
-
-        log.info(
-            "JAHANTAB | END"
-        )
 
 
 # ============================================================
-# ENTRY POINT
+# ENTRY
 # ============================================================
 
 if __name__ == "__main__":
 
-    main()
+    try:
+
+        main()
+
+    except KeyboardInterrupt:
+
+        log.info(
+            "Stopped."
+        )
+
+    except Exception as exc:
+
+        log.exception(
+            "Bridge failed: %s",
+            exc
+        )
+
+        raise
