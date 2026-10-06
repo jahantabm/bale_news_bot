@@ -1,19 +1,26 @@
-name: Jahantab Bale News Bot
+name: Jahantab Telegram to Bale Bridge
 
 on:
   workflow_dispatch:
   schedule:
     - cron: "*/5 * * * *"
 
+concurrency:
+  group: jahantab-bale-news-bridge
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
+
     permissions:
       contents: write
 
     env:
       BALE_BOT_TOKEN: ${{ secrets.BALE_BOT_TOKEN }}
       BALE_CHAT_ID: ${{ vars.BALE_CHAT_ID }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHANNEL_USERNAME: "jahantab_news"
 
     steps:
       - name: Checkout
@@ -28,17 +35,19 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run news bot
+      - name: Run Telegram to Bale bridge
         run: python bot.py
 
-      - name: Save sent-news state
+      - name: Save Telegram bridge state
         run: |
           git config user.name "jahantab-news-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add sent_links.txt
+
+          git add telegram_offset.json
+
           if git diff --cached --quiet; then
             echo "No state changes."
           else
-            git commit -m "Update sent news state"
+            git commit -m "Update Telegram bridge state"
             git push
           fi
