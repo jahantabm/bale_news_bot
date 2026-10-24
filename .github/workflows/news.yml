@@ -37,49 +37,68 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Test Rubika bot connection
+      - name: Diagnose Rubika updates
         env:
           RUBIKA_BOT_TOKEN: ${{ secrets.RUBIKA_BOT_TOKEN }}
         run: |
           python - <<'PY'
           import os
+          import json
           import requests
 
           token = os.environ.get("RUBIKA_BOT_TOKEN")
 
           if not token:
-              print("Rubika test skipped: RUBIKA_BOT_TOKEN is missing.")
-              raise SystemExit(1)
+              raise SystemExit("RUBIKA_BOT_TOKEN is missing.")
 
-          url = f"https://botapi.rubika.ir/v3/{token}/getMe"
+          url = f"https://botapi.rubika.ir/v3/{token}/getUpdates"
 
           try:
-              response = requests.post(url, timeout=30)
+              response = requests.post(
+                  url,
+                  json={"limit": 10},
+                  timeout=30
+              )
+
               print("Rubika HTTP status:", response.status_code)
               response.raise_for_status()
-
               data = response.json()
 
               if not isinstance(data, dict):
-                  print("Unexpected Rubika API response.")
-                  raise SystemExit(1)
+                  raise SystemExit("Unexpected Rubika API response.")
 
-              print("Rubika API response received.")
               print("Top-level response keys:", list(data.keys()))
 
-              if data.get("status") == "OK" or data.get("ok") is True:
-                  print("Rubika bot connection test passed.")
-              elif "data" in data or "bot" in data or "result" in data:
-                  print("Rubika returned bot information. Check response format.")
+              updates = data.get("updates")
+
+              if updates is None and isinstance(data.get("data"), dict):
+                  updates = data["data"].get("updates")
+
+              if not isinstance(updates, list):
+                  print("Updates list not found.")
+                  print("Response structure:")
+                  print(json.dumps(data, ensure_ascii=False)[:4000])
               else:
-                  print("Rubika returned a response; success format needs checking.")
-                  raise SystemExit(1)
+                  print("Updates received:", len(updates))
+
+                  for index, item in enumerate(updates, start=1):
+                      print(f"Update {index}:")
+                      print(
+                          json.dumps(
+                              item,
+                              ensure_ascii=False
+                          )[:2500]
+                      )
 
           except requests.RequestException as exc:
-              print("Rubika connection test failed:", type(exc).__name__)
+              print(
+                  "Rubika request failed:",
+                  type(exc).__name__
+              )
               raise SystemExit(1)
+
           except ValueError:
-              print("Rubika returned a non-JSON response.")
+              print("Rubika response was not valid JSON.")
               raise SystemExit(1)
           PY
 
