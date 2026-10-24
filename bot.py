@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 """
 JAHANTAB | Telegram -> Bale + Rubika
@@ -46,10 +47,6 @@ BALE_CAPTION_LIMIT = 950
 RUBIKA_TEXT_LIMIT = 4000
 RUBIKA_CAPTION_LIMIT = 900
 
-# ============================================================
-# LOGGING / SESSION
-# ============================================================
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s"
@@ -58,7 +55,7 @@ log = logging.getLogger("JAHANTAB-BRIDGE")
 
 session = requests.Session()
 session.headers.update({
-    "User-Agent": "JAHANTAB-Telegram-Bridge/3.0"
+    "User-Agent": "JAHANTAB-Telegram-Bridge/4.0"
 })
 
 
@@ -67,22 +64,31 @@ session.headers.update({
 # ============================================================
 
 def validate_config():
-    missing = []
-    for name, value in (
-        ("TELEGRAM_BOT_TOKEN", TELEGRAM_BOT_TOKEN),
-        ("BALE_BOT_TOKEN", BALE_BOT_TOKEN),
-        ("BALE_CHAT_ID", BALE_CHAT_ID),
-        ("RUBIKA_BOT_TOKEN", RUBIKA_BOT_TOKEN),
-        ("RUBIKA_CHAT_ID", RUBIKA_CHAT_ID),
-    ):
-        if not value:
-            missing.append(name)
+    # Read values again at runtime so missing environment variables
+    # are diagnosed accurately without printing secret values.
+    config = {
+        "TELEGRAM_BOT_TOKEN": os.getenv("TELEGRAM_BOT_TOKEN"),
+        "BALE_BOT_TOKEN": os.getenv("BALE_BOT_TOKEN"),
+        "BALE_CHAT_ID": os.getenv("BALE_CHAT_ID"),
+        "RUBIKA_BOT_TOKEN": os.getenv("RUBIKA_BOT_TOKEN"),
+        "RUBIKA_CHAT_ID": os.getenv("RUBIKA_CHAT_ID"),
+    }
+
+    missing = [
+        name for name, value in config.items()
+        if not value or not value.strip()
+    ]
+
+    log.info("RUBIKA_CHAT_ID available: %s",
+             bool(config["RUBIKA_CHAT_ID"]))
 
     if missing:
         raise RuntimeError(
             "Missing GitHub Actions variables/secrets: "
             + ", ".join(missing)
         )
+
+    return config
 
 
 # ============================================================
@@ -118,25 +124,28 @@ def bale_call(method, data=None, files=None):
 
 
 def rubika_call(method, payload=None, files=None):
-    """
-    Rubika Bot API v3.
-    A successful HTTP status alone does not guarantee API success.
-    """
     url = f"{RUBIKA_API}/{RUBIKA_BOT_TOKEN}/{method}"
 
-    response = session.post(
-        url,
-        json=payload or {},
-        files=files,
-        timeout=TIMEOUT
-    )
-    response.raise_for_status()
+    if files:
+        # Multipart requests generally require form fields alongside files.
+        response = session.post(
+            url,
+            data=payload or {},
+            files=files,
+            timeout=TIMEOUT
+        )
+    else:
+        response = session.post(
+            url,
+            json=payload or {},
+            timeout=TIMEOUT
+        )
 
+    response.raise_for_status()
     result = response.json()
 
     status = str(result.get("status", "")).lower()
     if status not in ("ok", "success"):
-        # Do not print tokens or the full request.
         raise RuntimeError(
             f"Rubika API returned status={status or 'unknown'} "
             f"for {method}"
@@ -185,9 +194,11 @@ def load_delivery_state():
 
 
 def save_delivery_state(state):
-    # Keep a bounded history to prevent the state file growing forever.
     if len(state) > 1000:
-        keys = sorted(state.keys(), key=lambda x: int(x) if x.isdigit() else 0)
+        keys = sorted(
+            state.keys(),
+            key=lambda x: int(x) if x.isdigit() else 0
+        )
         for key in keys[:-800]:
             state.pop(key, None)
     write_json(DELIVERY_FILE, state)
@@ -211,7 +222,10 @@ def get_updates(offset=None):
 def is_target_channel(message):
     chat = message.get("chat") or {}
     username = (chat.get("username") or "").lstrip("@").lower()
-    return chat.get("type") == "channel" and username == TELEGRAM_CHANNEL_USERNAME
+    return (
+        chat.get("type") == "channel"
+        and username == TELEGRAM_CHANNEL_USERNAME
+    )
 
 
 def download_telegram_file(file_id, suffix=""):
@@ -254,6 +268,7 @@ def get_text(message):
 def split_text(text, limit):
     if not text:
         return []
+
     parts = []
     remaining = text.strip()
 
@@ -294,7 +309,10 @@ def build_bale_keyboard(text=""):
     source_url = extract_source_url(text)
 
     if source_url:
-        rows.append([{"text": "🔗 مشاهده خبر", "url": source_url}])
+        rows.append([{
+            "text": "🔗 مشاهده خبر",
+            "url": source_url
+        }])
 
     rows.append([
         {"text": "📨 تلگرام", "url": TELEGRAM_URL},
@@ -302,7 +320,10 @@ def build_bale_keyboard(text=""):
         {"text": "🟠 سروش", "url": SOROUSH_URL}
     ])
 
-    return json.dumps({"inline_keyboard": rows}, ensure_ascii=False)
+    return json.dumps(
+        {"inline_keyboard": rows},
+        ensure_ascii=False
+    )
 
 
 # ============================================================
@@ -317,7 +338,10 @@ def send_bale_text(text):
     keyboard = build_bale_keyboard(text)
 
     for index, part in enumerate(parts):
-        data = {"chat_id": BALE_CHAT_ID, "text": part}
+        data = {
+            "chat_id": BALE_CHAT_ID,
+            "text": part
+        }
         if index == len(parts) - 1:
             data["reply_markup"] = keyboard
         bale_call("sendMessage", data=data)
@@ -375,10 +399,6 @@ def send_rubika_text(text):
 # ============================================================
 
 def send_rubika_media(method, field, file_path, caption=""):
-    """
-    Uses the v3 bot API's multipart endpoint.
-    Actual media field support must be confirmed by the test run.
-    """
     caption = caption or ""
 
     if len(caption) > RUBIKA_CAPTION_LIMIT:
@@ -504,9 +524,10 @@ def mirror_post(message, update_id, state):
         return True
 
     key = str(update_id)
-    entry = state.setdefault(key, {"bale": False, "rubika": False})
+    entry = state.setdefault(
+        key, {"bale": False, "rubika": False}
+    )
 
-    # Send to Bale only if not already recorded as delivered.
     if not entry.get("bale"):
         try:
             send_to_bale(message)
@@ -514,11 +535,13 @@ def mirror_post(message, update_id, state):
             save_delivery_state(state)
             log.info("Update %s delivered to Bale.", update_id)
         except Exception as exc:
-            log.error("Bale delivery failed for update %s: %s", update_id, type(exc).__name__)
+            log.error(
+                "Bale delivery failed for update %s: %s",
+                update_id, type(exc).__name__
+            )
             save_delivery_state(state)
             return False
 
-    # Rubika is independent; a Rubika failure must not resend to Bale.
     if not entry.get("rubika"):
         try:
             send_to_rubika(message)
@@ -526,7 +549,10 @@ def mirror_post(message, update_id, state):
             save_delivery_state(state)
             log.info("Update %s delivered to Rubika.", update_id)
         except Exception as exc:
-            log.error("Rubika delivery failed for update %s: %s", update_id, type(exc).__name__)
+            log.error(
+                "Rubika delivery failed for update %s: %s",
+                update_id, type(exc).__name__
+            )
             save_delivery_state(state)
             return False
 
@@ -561,7 +587,6 @@ def process_updates():
         success = mirror_post(message, update_id, state)
 
         if not success:
-            # Do not advance the offset; a later run retries failed delivery.
             raise RuntimeError(
                 f"Delivery incomplete for Telegram update {update_id}; "
                 "check the preceding destination error."
