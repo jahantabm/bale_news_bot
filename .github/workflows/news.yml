@@ -39,26 +39,24 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Check required configuration
-        env:
-          BALE_BOT_TOKEN: ${{ secrets.BALE_BOT_TOKEN }}
-          BALE_CHAT_ID: ${{ vars.BALE_CHAT_ID }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          RUBIKA_BOT_TOKEN: ${{ secrets.RUBIKA_BOT_TOKEN }}
-          RUBIKA_CHAT_ID: ${{ vars.RUBIKA_CHAT_ID }}
         run: |
           python - <<'PY'
           import os
           required = [
+              "TELEGRAM_BOT_TOKEN",
               "BALE_BOT_TOKEN",
               "BALE_CHAT_ID",
-              "TELEGRAM_BOT_TOKEN",
               "RUBIKA_BOT_TOKEN",
               "RUBIKA_CHAT_ID",
           ]
           missing = [
-              key for key in required
-              if not os.environ.get(key, "").strip()
+              name for name in required
+              if not os.getenv(name, "").strip()
           ]
+          print(
+              "RUBIKA_CHAT_ID available:",
+              bool(os.getenv("RUBIKA_CHAT_ID", "").strip())
+          )
           if missing:
               raise SystemExit(
                   "Missing GitHub Actions variables/secrets: "
