@@ -1,3 +1,4 @@
+
 name: Jahantab Telegram to Bale Bridge
 
 on:
@@ -21,6 +22,7 @@ jobs:
       BALE_CHAT_ID: ${{ vars.BALE_CHAT_ID }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHANNEL_USERNAME: "jahantab_news"
+      RUBIKA_BOT_TOKEN: ${{ secrets.RUBIKA_BOT_TOKEN }}
 
     steps:
       - name: Checkout
@@ -34,6 +36,52 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      - name: Test Rubika bot connection
+        env:
+          RUBIKA_BOT_TOKEN: ${{ secrets.RUBIKA_BOT_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os
+          import requests
+
+          token = os.environ.get("RUBIKA_BOT_TOKEN")
+
+          if not token:
+              print("Rubika test skipped: RUBIKA_BOT_TOKEN is missing.")
+              raise SystemExit(1)
+
+          url = f"https://botapi.rubika.ir/v3/{token}/getMe"
+
+          try:
+              response = requests.post(url, timeout=30)
+              print("Rubika HTTP status:", response.status_code)
+              response.raise_for_status()
+
+              data = response.json()
+
+              if not isinstance(data, dict):
+                  print("Unexpected Rubika API response.")
+                  raise SystemExit(1)
+
+              print("Rubika API response received.")
+              print("Top-level response keys:", list(data.keys()))
+
+              if data.get("status") == "OK" or data.get("ok") is True:
+                  print("Rubika bot connection test passed.")
+              elif "data" in data or "bot" in data or "result" in data:
+                  print("Rubika returned bot information. Check response format.")
+              else:
+                  print("Rubika returned a response; success format needs checking.")
+                  raise SystemExit(1)
+
+          except requests.RequestException as exc:
+              print("Rubika connection test failed:", type(exc).__name__)
+              raise SystemExit(1)
+          except ValueError:
+              print("Rubika returned a non-JSON response.")
+              raise SystemExit(1)
+          PY
 
       - name: Run Telegram to Bale bridge
         run: python bot.py
