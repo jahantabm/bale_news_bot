@@ -1,5 +1,5 @@
 
-name: Jahantab Telegram to Bale Bridge
+name: Jahantab Telegram to Bale and Rubika Bridge
 
 on:
   workflow_dispatch:
@@ -7,15 +7,15 @@ on:
     - cron: "*/5 * * * *"
 
 concurrency:
-  group: jahantab-bale-news-bridge
+  group: jahantab-telegram-bridge
   cancel-in-progress: false
+
+permissions:
+  contents: write
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-
-    permissions:
-      contents: write
 
     env:
       BALE_BOT_TOKEN: ${{ secrets.BALE_BOT_TOKEN }}
@@ -23,9 +23,10 @@ jobs:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHANNEL_USERNAME: "jahantab_news"
       RUBIKA_BOT_TOKEN: ${{ secrets.RUBIKA_BOT_TOKEN }}
+      RUBIKA_CHAT_ID: ${{ vars.RUBIKA_CHAT_ID }}
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v6
 
       - name: Setup Python
@@ -37,88 +38,49 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Diagnose Rubika updates
+      - name: Check required configuration
         env:
+          BALE_BOT_TOKEN: ${{ secrets.BALE_BOT_TOKEN }}
+          BALE_CHAT_ID: ${{ vars.BALE_CHAT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           RUBIKA_BOT_TOKEN: ${{ secrets.RUBIKA_BOT_TOKEN }}
+          RUBIKA_CHAT_ID: ${{ vars.RUBIKA_CHAT_ID }}
         run: |
           python - <<'PY'
           import os
-          import json
-          import requests
-
-          token = os.environ.get("RUBIKA_BOT_TOKEN")
-
-          if not token:
-              raise SystemExit("RUBIKA_BOT_TOKEN is missing.")
-
-          url = f"https://botapi.rubika.ir/v3/{token}/getUpdates"
-
-          try:
-              response = requests.post(
-                  url,
-                  json={"limit": 10},
-                  timeout=30
+          required = [
+              "BALE_BOT_TOKEN",
+              "BALE_CHAT_ID",
+              "TELEGRAM_BOT_TOKEN",
+              "RUBIKA_BOT_TOKEN",
+              "RUBIKA_CHAT_ID",
+          ]
+          missing = [
+              key for key in required
+              if not os.environ.get(key, "").strip()
+          ]
+          if missing:
+              raise SystemExit(
+                  "Missing GitHub Actions variables/secrets: "
+                  + ", ".join(missing)
               )
-
-              print("Rubika HTTP status:", response.status_code)
-              response.raise_for_status()
-              data = response.json()
-
-              if not isinstance(data, dict):
-                  raise SystemExit("Unexpected Rubika API response.")
-
-              print("Top-level response keys:", list(data.keys()))
-
-              updates = data.get("updates")
-
-              if updates is None and isinstance(data.get("data"), dict):
-                  updates = data["data"].get("updates")
-
-              if not isinstance(updates, list):
-                  print("Updates list not found.")
-                  print("Response structure:")
-                  print(json.dumps(data, ensure_ascii=False)[:4000])
-              else:
-                  print("Updates received:", len(updates))
-
-                  for index, item in enumerate(updates, start=1):
-                      print(f"Update {index}:")
-                      print(
-                          json.dumps(
-                              item,
-                              ensure_ascii=False
-                          )[:2500]
-                      )
-
-          except requests.RequestException as exc:
-              print(
-                  "Rubika request failed:",
-                  type(exc).__name__
-              )
-              raise SystemExit(1)
-
-          except ValueError:
-              print("Rubika response was not valid JSON.")
-              raise SystemExit(1)
+          print("Configuration check passed.")
           PY
 
-      - name: Run Telegram to Bale bridge
+      - name: Run Telegram to Bale and Rubika bridge
         run: python bot.py
 
-      - name: Save Telegram bridge state
+      - name: Save bridge state
+        if: always()
         run: |
           git config user.name "jahantab-news-bot"
           git config user.email "actions@users.noreply.github.com"
 
-          if [ -f telegram_offset.json ]; then
-            git add telegram_offset.json
+          git add -f telegram_offset.json delivery_state.json 2>/dev/null || true
 
-            if git diff --cached --quiet; then
-              echo "No state changes."
-            else
-              git commit -m "Update Telegram bridge state"
-              git push
-            fi
+          if git diff --cached --quiet; then
+            echo "No state changes to save."
           else
-            echo "telegram_offset.json does not exist. Nothing to save."
+            git commit -m "Update Telegram bridge state"
+            git push
           fi
