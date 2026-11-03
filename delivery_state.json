@@ -142,5 +142,9 @@
   "524542040": {
     "bale": false,
     "rubika": true
+  },
+  "524542050": {
+    "bale": false,
+    "rubika": false
   }
 }
