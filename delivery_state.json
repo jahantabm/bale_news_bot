@@ -250,5 +250,9 @@
   "524542202": {
     "bale": false,
     "rubika": false
+  },
+  "524542204": {
+    "bale": false,
+    "rubika": true
   }
 }
